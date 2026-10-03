@@ -361,6 +361,13 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
         }
     }
 
+    /** Rename path used by the drawer's inline rename field (no dialog). */
+    public void renameSessionToName(final TerminalSession sessionToRename, String text) {
+        if (sessionToRename == null) return;
+        renameSession(sessionToRename, text);
+        termuxSessionListNotifyUpdated();
+    }
+
     public void addNewSession(boolean isFailSafe, String sessionName) {
         TermuxService service = mActivity.getTermuxService();
         if (service == null) return;
