@@ -341,6 +341,22 @@ public final class TerminalView extends View {
         return new BaseInputConnection(this, true) {
 
             @Override
+            public boolean performEditorAction(int editorAction) {
+                // The IME action button (Go/Done/Search) was a no-op; treat it as Enter.
+                if (TERMINAL_VIEW_KEY_LOGGING_ENABLED)
+                    mClient.logInfo(LOG_TAG, "IME: performEditorAction(" + editorAction + ")");
+                if (editorAction == EditorInfo.IME_ACTION_DONE ||
+                    editorAction == EditorInfo.IME_ACTION_GO ||
+                    editorAction == EditorInfo.IME_ACTION_SEARCH ||
+                    editorAction == EditorInfo.IME_ACTION_SEND ||
+                    editorAction == EditorInfo.IME_ACTION_NEXT) {
+                    sendTextToTerminal("\r");
+                    return true;
+                }
+                return super.performEditorAction(editorAction);
+            }
+
+            @Override
             public boolean finishComposingText() {
                 if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) mClient.logInfo(LOG_TAG, "IME: finishComposingText()");
                 super.finishComposingText();
@@ -357,9 +373,13 @@ public final class TerminalView extends View {
                 }
                 super.commitText(text, newCursorPosition);
 
-                if (mEmulator == null) return true;
-
                 Editable content = getEditable();
+                if (mEmulator == null) {
+                    // Clear before returning so stale text is not flushed on the next attach.
+                    content.clear();
+                    return true;
+                }
+
                 sendTextToTerminal(content);
                 content.clear();
                 return true;
@@ -626,7 +646,7 @@ public final class TerminalView extends View {
             } else if (event.isButtonPressed(MotionEvent.BUTTON_TERTIARY)) {
                 ClipboardManager clipboardManager = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
                 ClipData clipData = clipboardManager.getPrimaryClip();
-                if (clipData != null) {
+                if (clipData != null && clipData.getItemCount() > 0) {
                     ClipData.Item clipItem = clipData.getItemAt(0);
                     if (clipItem != null) {
                         CharSequence text = clipItem.coerceToText(getContext());
