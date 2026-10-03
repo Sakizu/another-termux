@@ -37,6 +37,22 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
 
     private static final File BASE_DIR = TermuxConstants.TERMUX_HOME_DIR;
 
+    // Canonical $HOME path, resolved once. On Android /data/data/<pkg> is a symlink to
+    // /data/user/0/<pkg>, so comparing a canonicalized child path against the raw
+    // TERMUX_HOME_DIR_PATH would reject even the app's own $HOME. Both sides of the
+    // containment check are canonicalized so legitimate doc ids always match.
+    private static final String CANONICAL_HOME_DIR_PATH;
+
+    static {
+        String path = TermuxConstants.TERMUX_HOME_DIR_PATH;
+        try {
+            path = BASE_DIR.getCanonicalPath();
+        } catch (IOException ignored) {
+            // Fall back to the raw path; the containment checks below still apply.
+        }
+        CANONICAL_HOME_DIR_PATH = path;
+    }
+
 
     // The default columns to return information about a root if no specific
     // columns are requested in a query.
@@ -90,7 +106,12 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
     public Cursor queryChildDocuments(String parentDocumentId, String[] projection, String sortOrder) throws FileNotFoundException {
         final MatrixCursor result = new MatrixCursor(projection != null ? projection : DEFAULT_DOCUMENT_PROJECTION);
         final File parent = getFileForDocId(parentDocumentId);
-        for (File file : parent.listFiles()) {
+        final File[] files = parent.listFiles();
+        if (files == null) {
+            // The doc id names a regular file, or the directory cannot be read.
+            throw new FileNotFoundException("Cannot list children of document " + parentDocumentId);
+        }
+        for (File file : files) {
             includeFile(result, null, file);
         }
         return result;
@@ -117,10 +138,29 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
 
     @Override
     public String createDocument(String parentDocumentId, String mimeType, String displayName) throws FileNotFoundException {
-        File newFile = new File(parentDocumentId, displayName);
+        // Resolve and contain the parent directory before creating anything: getFileForDocId()
+        // throws FileNotFoundException for doc ids outside the app $HOME.
+        final File parentDir = getFileForDocId(parentDocumentId);
+        if (!parentDir.isDirectory()) {
+            throw new FileNotFoundException("Parent document is not a directory: " + parentDocumentId);
+        }
+        File newFile = new File(parentDir, displayName);
         int noConflictId = 2;
         while (newFile.exists()) {
-            newFile = new File(parentDocumentId, displayName + " (" + noConflictId++ + ")");
+            newFile = new File(parentDir, displayName + " (" + noConflictId++ + ")");
+        }
+        // Block ".." traversal smuggled in through displayName: the final path must stay
+        // inside the (already contained) parent directory.
+        final String parentCanonicalPath;
+        final String newCanonicalPath;
+        try {
+            parentCanonicalPath = parentDir.getCanonicalPath();
+            newCanonicalPath = newFile.getCanonicalPath();
+        } catch (IOException e) {
+            throw new FileNotFoundException("Failed to resolve new document path for " + displayName);
+        }
+        if (!newCanonicalPath.startsWith(parentCanonicalPath + File.separator)) {
+            throw new FileNotFoundException("New document path outside parent directory: " + displayName);
         }
         try {
             boolean succeeded;
@@ -206,9 +246,26 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
 
     /**
      * Get the file given a document id (the reverse of {@link #getDocIdForFile(File)}).
+     *
+     * The doc id is canonicalized and must resolve to the app $HOME directory itself or to a
+     * path under it; anything else (absolute paths elsewhere, ".." traversal, symlinks escaping
+     * $HOME) is rejected with a FileNotFoundException before the file is touched. All document
+     * id entry points (openDocument, openDocumentThumbnail, deleteDocument, getDocumentType and
+     * the query* methods) go through here, so the containment applies to every one of them.
      */
     private static File getFileForDocId(String docId) throws FileNotFoundException {
         final File f = new File(docId);
+        final String canonicalPath;
+        try {
+            // Canonicalize to resolve ".." segments and symlinks.
+            canonicalPath = f.getCanonicalPath();
+        } catch (IOException e) {
+            throw new FileNotFoundException("Failed to resolve document id " + docId + ": " + e.getMessage());
+        }
+        if (!canonicalPath.equals(CANONICAL_HOME_DIR_PATH)
+            && !canonicalPath.startsWith(CANONICAL_HOME_DIR_PATH + File.separator)) {
+            throw new FileNotFoundException("Document id outside app home directory: " + docId);
+        }
         if (!f.exists()) throw new FileNotFoundException(f.getAbsolutePath() + " not found");
         return f;
     }
