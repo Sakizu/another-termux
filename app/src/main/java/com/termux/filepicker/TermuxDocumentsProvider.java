@@ -231,7 +231,12 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
 
     @Override
     public boolean isChildDocument(String parentDocumentId, String documentId) {
-        return documentId.startsWith(parentDocumentId);
+        // Document ids are absolute paths; anchor the prefix on a path separator
+        // so a sibling like "/data/data/com.termux/files/home2" is not treated
+        // as a child of "/data/data/com.termux/files/home".
+        if (documentId.equals(parentDocumentId)) return true;
+        String prefix = parentDocumentId.endsWith("/") ? parentDocumentId : parentDocumentId + "/";
+        return documentId.startsWith(prefix);
     }
 
     /**
