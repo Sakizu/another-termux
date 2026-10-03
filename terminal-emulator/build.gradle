@@ -16,14 +16,7 @@ android {
         }
 
         ndk {
-            // TERMUX_AUDIT_ABIS: comma-separated ABI subset (e.g. "arm64-v8a").
-            // Unset (default): upstream behaviour — all four ABIs.
-            def auditAbis = System.getenv("TERMUX_AUDIT_ABIS")
-            if (auditAbis != null && !auditAbis.trim().isEmpty()) {
-                abiFilters auditAbis.split(",").collect { it.trim() }
-            } else {
-                abiFilters 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
-            }
+            abiFilters 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
         }
     }
 
