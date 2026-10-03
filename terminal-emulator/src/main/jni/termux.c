@@ -55,10 +55,11 @@ static int create_subprocess(JNIEnv* env,
 
     // Enable UTF-8 mode and disable flow control to prevent Ctrl+S from locking up the display.
     struct termios tios;
-    tcgetattr(ptm, &tios);
-    tios.c_iflag |= IUTF8;
-    tios.c_iflag &= ~(IXON | IXOFF);
-    tcsetattr(ptm, TCSANOW, &tios);
+    if (tcgetattr(ptm, &tios) == 0) {
+        tios.c_iflag |= IUTF8;
+        tios.c_iflag &= ~(IXON | IXOFF);
+        tcsetattr(ptm, TCSANOW, &tios);
+    }
 
     /** Set initial winsize. */
     struct winsize sz = { .ws_row = (unsigned short) rows, .ws_col = (unsigned short) columns, .ws_xpixel = (unsigned short) (columns * cell_width), .ws_ypixel = (unsigned short) (rows * cell_height)};
@@ -77,11 +78,19 @@ static int create_subprocess(JNIEnv* env,
         sigfillset(&signals_to_unblock);
         sigprocmask(SIG_UNBLOCK, &signals_to_unblock, 0);
 
+        // Reset signal dispositions to default. The JVM may have set e.g.
+        // SIGPIPE to SIG_IGN, which would otherwise be inherited across
+        // execvp() into the user's shell and all its children.
+        struct sigaction default_action;
+        memset(&default_action, 0, sizeof(default_action));
+        default_action.sa_handler = SIG_DFL;
+        for (int signum = 1; signum < NSIG; signum++) sigaction(signum, &default_action, NULL);
+
         close(ptm);
         setsid();
 
         int pts = open(devname, O_RDWR);
-        if (pts < 0) exit(-1);
+        if (pts < 0) _exit(127);
 
         dup2(pts, 0);
         dup2(pts, 1);
@@ -137,9 +146,11 @@ JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_createSubprocess(
         if (!argv) return throw_runtime_exception(env, "Couldn't allocate argv array");
         for (int i = 0; i < size; ++i) {
             jstring arg_java_string = (jstring) (*env)->GetObjectArrayElement(env, args, i);
+            if (!arg_java_string) return throw_runtime_exception(env, "Null argv element");
             char const* arg_utf8 = (*env)->GetStringUTFChars(env, arg_java_string, NULL);
             if (!arg_utf8) return throw_runtime_exception(env, "GetStringUTFChars() failed for argv");
             argv[i] = strdup(arg_utf8);
+            if (!argv[i]) return throw_runtime_exception(env, "strdup() failed for argv");
             (*env)->ReleaseStringUTFChars(env, arg_java_string, arg_utf8);
             (*env)->DeleteLocalRef(env, arg_java_string);
         }
@@ -153,9 +164,11 @@ JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_createSubprocess(
         if (!envp) return throw_runtime_exception(env, "malloc() for envp array failed");
         for (int i = 0; i < size; ++i) {
             jstring env_java_string = (jstring) (*env)->GetObjectArrayElement(env, envVars, i);
+            if (!env_java_string) return throw_runtime_exception(env, "Null envp element");
             char const* env_utf8 = (*env)->GetStringUTFChars(env, env_java_string, 0);
             if (!env_utf8) return throw_runtime_exception(env, "GetStringUTFChars() failed for env");
             envp[i] = strdup(env_utf8);
+            if (!envp[i]) return throw_runtime_exception(env, "strdup() failed for envp");
             (*env)->ReleaseStringUTFChars(env, env_java_string, env_utf8);
             (*env)->DeleteLocalRef(env, env_java_string);
         }

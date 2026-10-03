@@ -498,6 +498,8 @@ public final class TerminalEmulator {
      * @param length the number of bytes in the array to process
      */
     public void append(byte[] buffer, int length) {
+        if (length < 0 || length > buffer.length)
+            throw new IllegalArgumentException("length out of bounds: " + length);
         for (int i = 0; i < length; i++)
             processByte(buffer[i]);
     }
@@ -1043,6 +1045,10 @@ public final class TerminalEmulator {
     private void doApc(int b) {
         if (b == 27) {
             continueSequence(ESC_APC_ESCAPE);
+        } else if (b == 7) {
+            // BEL also terminates the sequence, like OSC; without this an
+            // unterminated APC would swallow all subsequent output forever.
+            finishSequence();
         }
         // Eat APC sequences silently for now.
     }

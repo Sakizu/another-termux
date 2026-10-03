@@ -233,7 +233,10 @@ public final class TerminalSession extends TerminalOutput {
 
     /** Finish this terminal session by sending SIGKILL to the shell. */
     public void finishIfRunning() {
-        if (isRunning()) {
+        // mShellPid is 0 if the subprocess was never started (createSubprocess
+        // threw); kill(0, ...) would signal our own process group, so require
+        // a real positive pid.
+        if (isRunning() && mShellPid > 0) {
             try {
                 Os.kill(mShellPid, OsConstants.SIGKILL);
             } catch (ErrnoException e) {
