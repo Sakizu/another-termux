@@ -31,6 +31,7 @@ import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
@@ -179,9 +180,18 @@ final class TermuxInstaller {
                                         throw new RuntimeException("Malformed symlink line: " + line);
                                     String oldPath = parts[0];
                                     String newPath = TERMUX_STAGING_PREFIX_DIR_PATH + "/" + parts[1];
+                                    File symlinkFile = new File(newPath);
+
+                                    // Contain path traversal: abort before creating directories or the symlink.
+                                    if (!isWithinStagingPrefixDir(symlinkFile)) {
+                                        showBootstrapErrorDialog(activity, whenDone,
+                                            "Bootstrap symlink target \"" + parts[1] + "\" resolves outside the staging prefix directory. Aborting installation.");
+                                        return;
+                                    }
+
                                     symlinks.add(Pair.create(oldPath, newPath));
 
-                                    error = ensureDirectoryExists(new File(newPath).getParentFile());
+                                    error = ensureDirectoryExists(symlinkFile.getParentFile());
                                     if (error != null) {
                                         showBootstrapErrorDialog(activity, whenDone, Error.getErrorMarkdownString(error));
                                         return;
@@ -191,6 +201,13 @@ final class TermuxInstaller {
                                 String zipEntryName = zipEntry.getName();
                                 File targetFile = new File(TERMUX_STAGING_PREFIX_DIR_PATH, zipEntryName);
                                 boolean isDirectory = zipEntry.isDirectory();
+
+                                // Contain zip-slip: abort the install before writing anything outside staging.
+                                if (!isWithinStagingPrefixDir(targetFile)) {
+                                    showBootstrapErrorDialog(activity, whenDone,
+                                        "Bootstrap zip entry \"" + zipEntryName + "\" resolves outside the staging prefix directory. Aborting installation.");
+                                    return;
+                                }
 
                                 error = ensureDirectoryExists(isDirectory ? targetFile : targetFile.getParentFile());
                                 if (error != null) {
@@ -449,6 +466,26 @@ final class TermuxInstaller {
 
     private static Error ensureDirectoryExists(File directory) {
         return FileUtils.createDirectoryFile(directory.getAbsolutePath());
+    }
+
+    /**
+     * Check whether {@code target} canonicalizes to a location strictly inside {@code baseDir}.
+     * Pure Java helper (no Android dependencies) used to contain zip-slip/path-traversal
+     * entries during bootstrap extraction. Fails closed: any canonicalization error returns false.
+     */
+    static boolean isWithinDirectory(File baseDir, File target) {
+        try {
+            String canonicalBase = baseDir.getCanonicalPath();
+            String canonicalTarget = target.getCanonicalPath();
+            return canonicalTarget.startsWith(canonicalBase + File.separator);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** {@link #isWithinDirectory(File, File)} against the bootstrap staging prefix directory. */
+    static boolean isWithinStagingPrefixDir(File target) {
+        return isWithinDirectory(TERMUX_STAGING_PREFIX_DIR, target);
     }
 
     public static byte[] loadZipBytes() {
