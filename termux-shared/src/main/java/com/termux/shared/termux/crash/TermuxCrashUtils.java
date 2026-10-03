@@ -363,8 +363,16 @@ public class TermuxCrashUtils implements CrashHandler.CrashHandlerClient {
 
         // Send the notification
         NotificationManager notificationManager = NotificationUtils.getNotificationManager(termuxPackageContext);
-        if (notificationManager != null)
-            notificationManager.notify(nextNotificationId, builder.build());
+        if (notificationManager != null) {
+            try {
+                notificationManager.notify(nextNotificationId, builder.build());
+            } catch (RuntimeException e) {
+                // The crash reporter must never crash the app itself. notify() can throw
+                // SecurityException (a RuntimeException), e.g. if the notification manager
+                // no longer trusts this package, so log the failure instead of propagating.
+                Logger.logStackTraceWithMessage(logTag, "Failed to send \"" + title + "\" notification.", e);
+            }
+        }
     }
 
     /**
