@@ -119,9 +119,9 @@ public class AmSocketServer {
         if (error != null) {
             sendResultToClient(localSocketManager, clientSocket, 1, stdout.toString(),
                 !stderr.toString().isEmpty() ? stderr + "\n\n" + error : error.toString());
+        } else {
+            sendResultToClient(localSocketManager, clientSocket, 0, stdout.toString(), stderr.toString());
         }
-
-        sendResultToClient(localSocketManager, clientSocket, 0, stdout.toString(), stderr.toString());
     }
 
     /**
