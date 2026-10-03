@@ -19,6 +19,9 @@
 using namespace std;
 
 
+/* Forward declarations. */
+bool checkJniException(JNIEnv *env);
+
 /* Convert a jstring to a std:string. */
 string jstring_to_stdstr(JNIEnv *env, jstring jString) {
     jclass stringClass = env->FindClass("java/lang/String");
