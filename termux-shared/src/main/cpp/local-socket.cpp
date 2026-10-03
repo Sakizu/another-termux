@@ -387,7 +387,10 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_readNative(JNIEnv *en
         }
 
         // Read data from socket
-        int ret = read(fd, current, bytes);
+        // Only request the remaining capacity (bytes - bytesRead): `bytes` is the full
+        // array length but `current` advances each iteration, so passing the full
+        // `bytes` on the 2nd+ iteration would write past the end of the buffer.
+        int ret = read(fd, current, bytes - bytesRead);
         if (ret == -1) {
             int errnoBackup = errno;
             env->ReleaseByteArrayElements(dataArray, data, 0);
