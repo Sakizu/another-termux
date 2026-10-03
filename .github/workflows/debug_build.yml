@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Clone repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Java 11
         # AGP 4.2.2 + Gradle 7.2 predate the runner's default JDK (Temurin 17):
