@@ -47,7 +47,7 @@ public class TerminalExtraKeys implements ExtraKeysView.IExtraKeysView {
                 }
             }
         } else {
-            onTerminalExtraKeyButtonClick(view, buttonInfo.getKey(), false, false, false, false);
+            onTerminalExtraKeyButtonClick(view, buttonInfo.getKey(), buttonInfo.isCtrl(), buttonInfo.isAlt(), buttonInfo.isShift(), buttonInfo.isFn());
         }
     }
 

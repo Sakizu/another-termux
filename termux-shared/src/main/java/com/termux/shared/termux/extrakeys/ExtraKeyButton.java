@@ -25,6 +25,18 @@ public class ExtraKeyButton {
     /** The key name for the nested dict to define popup extra key info if using a dict to define the extra key. {popup: {key: name, ...}, ...} */
     public static final String KEY_POPUP = "popup";
 
+    /** The key name for the ctrl value of the extra key if using a dict to define the extra key. {ctrl: true, ...} */
+    public static final String KEY_CTRL = "ctrl";
+
+    /** The key name for the alt value of the extra key if using a dict to define the extra key. {alt: true, ...} */
+    public static final String KEY_ALT = "alt";
+
+    /** The key name for the shift value of the extra key if using a dict to define the extra key. {shift: true, ...} */
+    public static final String KEY_SHIFT = "shift";
+
+    /** The key name for the fn value of the extra key if using a dict to define the extra key. {fn: true, ...} */
+    public static final String KEY_FN = "fn";
+
 
     /**
      * The key that will be sent to the terminal, either a control character, like defined in
@@ -41,6 +53,26 @@ public class ExtraKeyButton {
      * The text that will be displayed on the button.
      */
     private final String display;
+
+    /**
+     * Whether the key should be sent with the ctrl modifier held down.
+     */
+    private final boolean ctrl;
+
+    /**
+     * Whether the key should be sent with the alt modifier held down.
+     */
+    private final boolean alt;
+
+    /**
+     * Whether the key should be sent with the shift modifier held down.
+     */
+    private final boolean shift;
+
+    /**
+     * Whether the key should be sent with the fn modifier held down.
+     */
+    private final boolean fn;
 
     /**
      * The {@link ExtraKeyButton} containing the information of the popup button (triggered by swipe up).
@@ -109,6 +141,11 @@ public class ExtraKeyButton {
                 .collect(Collectors.joining(" "));
         }
 
+        this.ctrl = getBooleanFromJson(config, KEY_CTRL);
+        this.alt = getBooleanFromJson(config, KEY_ALT);
+        this.shift = getBooleanFromJson(config, KEY_SHIFT);
+        this.fn = getBooleanFromJson(config, KEY_FN);
+
         this.popup = popup;
     }
 
@@ -117,6 +154,14 @@ public class ExtraKeyButton {
             return config.getString(key);
         } catch (JSONException e) {
             return null;
+        }
+    }
+
+    public boolean getBooleanFromJson(@NonNull JSONObject config, @NonNull String key) {
+        try {
+            return config.getBoolean(key);
+        } catch (JSONException e) {
+            return false;
         }
     }
 
@@ -133,6 +178,26 @@ public class ExtraKeyButton {
     /** Get {@link #display}. */
     public String getDisplay() {
         return display;
+    }
+
+    /** Check whether {@link #ctrl} is set or not. */
+    public boolean isCtrl() {
+        return ctrl;
+    }
+
+    /** Check whether {@link #alt} is set or not. */
+    public boolean isAlt() {
+        return alt;
+    }
+
+    /** Check whether {@link #shift} is set or not. */
+    public boolean isShift() {
+        return shift;
+    }
+
+    /** Check whether {@link #fn} is set or not. */
+    public boolean isFn() {
+        return fn;
     }
 
     /** Get {@link #popup}. */
