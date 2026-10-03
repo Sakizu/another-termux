@@ -111,9 +111,18 @@ public class IntentUtils {
     }
 
     public static String getIntentString(Intent intent) {
+        return getIntentString(intent, true);
+    }
+
+    /**
+     * Get a log string for the intent. When {@code includeExtras} is false the
+     * extras bundle is omitted, since it may carry secrets and the log can end
+     * up in user-shared debug reports.
+     */
+    public static String getIntentString(Intent intent, boolean includeExtras) {
         if (intent == null) return null;
 
-        return intent.toString() + "\n" + getBundleString(intent.getExtras());
+        return intent.toString() + "\n" + (includeExtras ? getBundleString(intent.getExtras()) : "Bundle[<redacted>]");
     }
 
     public static String getBundleString(Bundle bundle) {

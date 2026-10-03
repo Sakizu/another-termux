@@ -152,6 +152,10 @@ public class FileReceiverActivity extends AppCompatActivity {
             if (attachmentFileName == null) attachmentFileName = UriUtils.getUriFileBasename(uri, true);
 
             InputStream in = getContentResolver().openInputStream(uri);
+            if (in == null) {
+                showErrorDialogAndQuit("Unable to open shared content stream.");
+                return;
+            }
             promptNameAndSave(in, attachmentFileName);
         } catch (Exception e) {
             showErrorDialogAndQuit("Unable to handle shared content:\n\n" + e.getMessage());

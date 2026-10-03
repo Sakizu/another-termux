@@ -189,6 +189,14 @@ final class TermuxInstaller {
                                         return;
                                     }
 
+                                    // Validate the symlink target too: it must resolve inside the
+                                    // staging prefix, not to an absolute or escaping path.
+                                    if (!isWithinStagingPrefixDir(new File(symlinkFile.getParentFile(), oldPath))) {
+                                        showBootstrapErrorDialog(activity, whenDone,
+                                            "Bootstrap symlink target \"" + oldPath + "\" resolves outside the staging prefix directory. Aborting installation.");
+                                        return;
+                                    }
+
                                     symlinks.add(Pair.create(oldPath, newPath));
 
                                     error = ensureDirectoryExists(symlinkFile.getParentFile());

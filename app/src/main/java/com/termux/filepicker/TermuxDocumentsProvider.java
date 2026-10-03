@@ -211,7 +211,9 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
             // through the whole SD card).
             boolean isInsideHome;
             try {
-                isInsideHome = file.getCanonicalPath().startsWith(TermuxConstants.TERMUX_HOME_DIR_PATH);
+                String canonicalPath = file.getCanonicalPath();
+                isInsideHome = canonicalPath.equals(CANONICAL_HOME_DIR_PATH) ||
+                    canonicalPath.startsWith(CANONICAL_HOME_DIR_PATH + File.separator);
             } catch (IOException e) {
                 isInsideHome = true;
             }

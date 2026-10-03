@@ -132,7 +132,7 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
 
         String action = null;
         if (intent != null) {
-            Logger.logVerboseExtended(LOG_TAG, "Intent Received:\n" + IntentUtils.getIntentString(intent));
+            Logger.logVerboseExtended(LOG_TAG, "Intent Received:\n" + IntentUtils.getIntentString(intent, false));
             action = intent.getAction();
         }
 
