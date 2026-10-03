@@ -373,6 +373,10 @@ public final class TerminalView extends View {
                 // The stock Samsung keyboard with 'Auto check spelling' enabled sends leftLength > 1.
                 KeyEvent deleteKey = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL);
                 for (int i = 0; i < leftLength; i++) sendKeyEvent(deleteKey);
+                if (rightLength > 0) {
+                    KeyEvent forwardDeleteKey = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL);
+                    for (int i = 0; i < rightLength; i++) sendKeyEvent(forwardDeleteKey);
+                }
                 return super.deleteSurroundingText(leftLength, rightLength);
             }
 
@@ -390,7 +394,11 @@ public final class TerminalView extends View {
                             codePoint = TerminalEmulator.UNICODE_REPLACEMENT_CHAR;
                         }
                     } else {
-                        codePoint = firstChar;
+                        // A lone low surrogate has no leading high surrogate; replace it rather
+                        // than writing it to the terminal raw.
+                        codePoint = Character.isLowSurrogate(firstChar)
+                            ? TerminalEmulator.UNICODE_REPLACEMENT_CHAR
+                            : firstChar;
                     }
 
                     // Check onKeyDown() for details.
