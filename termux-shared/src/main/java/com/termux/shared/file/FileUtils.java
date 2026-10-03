@@ -1829,7 +1829,7 @@ public class FileUtils {
         if (permissionsToSet.contains("r")) {
             if (!file.canRead()) {
                 Logger.logVerbose(LOG_TAG, "Setting read permissions for " + label + "file at path \"" + filePath + "\"");
-                file.setReadable(true);
+                file.setReadable(true, true);
             }
         } else {
             if (file.canRead()) {
@@ -1842,7 +1842,7 @@ public class FileUtils {
         if (permissionsToSet.contains("w")) {
             if (!file.canWrite()) {
                 Logger.logVerbose(LOG_TAG, "Setting write permissions for " + label + "file at path \"" + filePath + "\"");
-                file.setWritable(true);
+                file.setWritable(true, true);
             }
         } else {
             if (file.canWrite()) {
@@ -1855,7 +1855,7 @@ public class FileUtils {
         if (permissionsToSet.contains("x")) {
             if (!file.canExecute()) {
                 Logger.logVerbose(LOG_TAG, "Setting execute permissions for " + label + "file at path \"" + filePath + "\"");
-                file.setExecutable(true);
+                file.setExecutable(true, true);
             }
         } else {
             if (file.canExecute()) {
@@ -1899,17 +1899,17 @@ public class FileUtils {
 
         if (permissionsToSet.contains("r") && !file.canRead()) {
             Logger.logVerbose(LOG_TAG, "Setting missing read permissions for " + label + "file at path \"" + filePath + "\"");
-            file.setReadable(true);
+            file.setReadable(true, true);
         }
 
         if (permissionsToSet.contains("w") && !file.canWrite()) {
             Logger.logVerbose(LOG_TAG, "Setting missing write permissions for " + label + "file at path \"" + filePath + "\"");
-            file.setWritable(true);
+            file.setWritable(true, true);
         }
 
         if (permissionsToSet.contains("x") && !file.canExecute()) {
             Logger.logVerbose(LOG_TAG, "Setting missing execute permissions for " + label + "file at path \"" + filePath + "\"");
-            file.setExecutable(true);
+            file.setExecutable(true, true);
         }
     }
 
