@@ -1,9 +1,64 @@
-<com.google.android.material.textview.MaterialTextView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/session_title"
-    android:layout_width="fill_parent"
-    android:layout_height="?android:attr/listPreferredItemHeight"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="52dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
     android:background="@drawable/session_background_selected"
-    android:ellipsize="marquee"
-    android:gravity="start|center_vertical"
-    android:padding="6dip"
-    android:textSize="14sp" />
+    android:paddingStart="2dp"
+    android:paddingEnd="2dp">
+
+    <View
+        android:id="@+id/session_active_marker"
+        android:layout_width="3dp"
+        android:layout_height="match_parent"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:background="?attr/termuxActivityDrawerImageTint"
+        android:visibility="invisible" />
+
+    <ImageView
+        android:id="@+id/session_drag_handle"
+        android:layout_width="36dp"
+        android:layout_height="match_parent"
+        android:src="@drawable/ic_drag_handle"
+        android:contentDescription="@string/desc_drag_to_reorder"
+        app:tint="?attr/termuxActivityDrawerImageTint"
+        android:padding="10dp" />
+
+    <com.google.android.material.textview.MaterialTextView
+        android:id="@+id/session_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="marquee"
+        android:singleLine="false"
+        android:maxLines="2"
+        android:gravity="start|center_vertical"
+        android:padding="6dp"
+        android:textSize="14sp" />
+
+    <EditText
+        android:id="@+id/session_rename_field"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:visibility="gone"
+        android:singleLine="true"
+        android:imeOptions="actionDone"
+        android:inputType="text"
+        android:background="@null"
+        android:padding="6dp"
+        android:textSize="14sp" />
+
+    <ImageButton
+        android:id="@+id/session_rename_button"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/ic_edit"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/title_rename_session"
+        app:tint="?attr/termuxActivityDrawerImageTint" />
+
+</LinearLayout>
