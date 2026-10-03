@@ -135,6 +135,12 @@ public class OperatingSystemControlTest extends TerminalTestCase {
 		assertIndexColorsMatch(expectedColors);
 		enterString("\033]104\007"); // Reset all colors.
 		assertIndexColorsMatch(TerminalColors.COLOR_SCHEME.mDefaultColors);
+
+		// Out-of-range indices must be ignored, not crash the app.
+		enterString("\033]104;99999\007");
+		enterString("\033]104;-1\007");
+		enterString("\033]104;256;257\007");
+		assertIndexColorsMatch(TerminalColors.COLOR_SCHEME.mDefaultColors);
 	}
 
 	public void disabledTestSetClipboard() {

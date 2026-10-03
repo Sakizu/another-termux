@@ -19,8 +19,10 @@ public final class TerminalColors {
         reset();
     }
 
-    /** Reset a particular indexed color with the default color from the color theme. */
+    /** Reset a particular indexed color with the default color from the color theme.
+     * Out-of-range indices are ignored (OSC sequences can carry arbitrary numbers). */
     public void reset(int index) {
+        if (index < 0 || index >= mCurrentColors.length) return;
         mCurrentColors[index] = COLOR_SCHEME.mDefaultColors[index];
     }
 
