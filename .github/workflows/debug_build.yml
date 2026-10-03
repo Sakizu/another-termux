@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - 'github-releases/**'
+      - 'vibecoding' # overhaul branch: build on push
   pull_request:
     branches:
       - master
@@ -15,11 +16,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package_variant: [ apt-android-7, apt-android-5 ]
+        # Audit fork: single variant. apt-android-5 is legacy (Android 5/6);
+        # upstream README says Android >= 7 needs only apt-android-7 variants.
+        package_variant: [ apt-android-7 ]
 
     steps:
       - name: Clone repository
         uses: actions/checkout@v4
+
+      - name: Setup Java 11
+        # AGP 4.2.2 + Gradle 7.2 predate the runner's default JDK (Temurin 17):
+        # without a pinned JDK the com.android.application plugin silently
+        # fails to apply ("No signature of method: ... .android()").
+        # Java 11 is the newest JDK this Gradle/AGP combo officially supports.
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
 
       - name: Build APKs
         shell: bash {0}
@@ -55,36 +68,27 @@ jobs:
           export TERMUX_APP_VERSION_NAME="${RELEASE_VERSION_NAME/v/}" # Used by app/build.gradle
           export TERMUX_APK_VERSION_TAG="$APK_VERSION_TAG" # Used by app/build.gradle
           export TERMUX_PACKAGE_VARIANT="${{ env.PACKAGE_VARIANT }}" # Used by app/build.gradle
+          # Audit fork: arm64-only build (smaller APK, faster CI, ~100 MB less bootstrap download).
+          # Unset TERMUX_AUDIT_ABIS to restore upstream all-ABI behaviour.
+          export TERMUX_AUDIT_ABIS="arm64-v8a"
           if ! ./gradlew assembleDebug; then
             exit_on_error "Build failed for '$APK_VERSION_TAG' build."
           fi
 
           echo "Validating APKs"
-          for abi in universal arm64-v8a armeabi-v7a x86_64 x86; do
-            if ! test -f "$APK_DIR_PATH/${APK_BASENAME_PREFIX}_$abi.apk"; then
-              files_found="$(ls "$APK_DIR_PATH")"
-              exit_on_error "Failed to find built APK at '$APK_DIR_PATH/${APK_BASENAME_PREFIX}_$abi.apk'. Files found: "$'\n'"$files_found"
-            fi
-          done
+          # arm64-only (TERMUX_AUDIT_ABIS=arm64-v8a disables the universal APK),
+          # so only the arm64-v8a APK is expected.
+          if ! test -f "$APK_DIR_PATH/${APK_BASENAME_PREFIX}_arm64-v8a.apk"; then
+            files_found="$(ls "$APK_DIR_PATH")"
+            exit_on_error "Failed to find built APK at '$APK_DIR_PATH/${APK_BASENAME_PREFIX}_arm64-v8a.apk'. Files found: "$'\n'"$files_found"
+          fi
 
           echo "Generating sha25sums file"
           if ! (cd "$APK_DIR_PATH"; sha256sum \
-            "${APK_BASENAME_PREFIX}_universal.apk" \
             "${APK_BASENAME_PREFIX}_arm64-v8a.apk" \
-            "${APK_BASENAME_PREFIX}_armeabi-v7a.apk" \
-            "${APK_BASENAME_PREFIX}_x86_64.apk" \
-            "${APK_BASENAME_PREFIX}_x86.apk" \
             > "${APK_BASENAME_PREFIX}_sha256sums"); then
             exit_on_error "Generate sha25sums failed for '$APK_VERSION_TAG' release."
           fi
-
-      - name: Attach universal APK file
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APK_BASENAME_PREFIX }}_universal
-          path: |
-            ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_universal.apk
-            ${{ env.APK_DIR_PATH }}/output-metadata.json
 
       - name: Attach arm64-v8a APK file
         uses: actions/upload-artifact@v4
@@ -92,30 +96,6 @@ jobs:
           name: ${{ env.APK_BASENAME_PREFIX }}_arm64-v8a
           path: |
             ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_arm64-v8a.apk
-            ${{ env.APK_DIR_PATH }}/output-metadata.json
-
-      - name: Attach armeabi-v7a APK file
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APK_BASENAME_PREFIX }}_armeabi-v7a
-          path: |
-            ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_armeabi-v7a.apk
-            ${{ env.APK_DIR_PATH }}/output-metadata.json
-
-      - name: Attach x86_64 APK file
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APK_BASENAME_PREFIX }}_x86_64
-          path: |
-            ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_x86_64.apk
-            ${{ env.APK_DIR_PATH }}/output-metadata.json
-
-      - name: Attach x86 APK file
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APK_BASENAME_PREFIX }}_x86
-          path: |
-            ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_x86.apk
             ${{ env.APK_DIR_PATH }}/output-metadata.json
 
       - name: Attach sha256sums file
