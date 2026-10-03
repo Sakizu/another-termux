@@ -68,9 +68,6 @@ jobs:
           export TERMUX_APP_VERSION_NAME="${RELEASE_VERSION_NAME/v/}" # Used by app/build.gradle
           export TERMUX_APK_VERSION_TAG="$APK_VERSION_TAG" # Used by app/build.gradle
           export TERMUX_PACKAGE_VARIANT="${{ env.PACKAGE_VARIANT }}" # Used by app/build.gradle
-          # Audit fork: arm64-only build (smaller APK, faster CI, ~100 MB less bootstrap download).
-          # Unset TERMUX_AUDIT_ABIS to restore upstream all-ABI behaviour.
-          export TERMUX_AUDIT_ABIS="arm64-v8a"
           if ! ./gradlew assembleDebug; then
             exit_on_error "Build failed for '$APK_VERSION_TAG' build."
           fi
