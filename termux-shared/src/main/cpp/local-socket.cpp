@@ -22,8 +22,11 @@ using namespace std;
 /* Convert a jstring to a std:string. */
 string jstring_to_stdstr(JNIEnv *env, jstring jString) {
     jclass stringClass = env->FindClass("java/lang/String");
+    if (checkJniException(env) || stringClass == nullptr) return "";
     jmethodID getBytes = env->GetMethodID(stringClass, "getBytes", "()[B");
+    if (checkJniException(env) || getBytes == nullptr) return "";
     jbyteArray jStringBytesArray = (jbyteArray) env->CallObjectMethod(jString, getBytes);
+    if (checkJniException(env) || jStringBytesArray == nullptr) return "";
     jsize length = env->GetArrayLength(jStringBytesArray);
     jbyte* jStringBytes = env->GetByteArrayElements(jStringBytesArray, nullptr);
     std::string stdString((char *)jStringBytes, length);
@@ -65,8 +68,11 @@ string replace_null_with_space(string str) {
 /* Get class name of a jclazz object with a call to `Class.getName()`. */
 string get_class_name(JNIEnv *env, jclass clazz) {
     jclass classClass = env->FindClass("java/lang/Class");
+    if (checkJniException(env) || classClass == nullptr) return "";
     jmethodID getName = env->GetMethodID(classClass, "getName", "()Ljava/lang/String;");
+    if (checkJniException(env) || getName == nullptr) return "";
     jstring className = (jstring) env->CallObjectMethod(clazz, getName);
+    if (checkJniException(env) || className == nullptr) return "";
     return jstring_to_stdstr(env, className);
 }
 
@@ -371,7 +377,7 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_readNative(JNIEnv *en
     int bytesRead = 0;
     while (bytesRead < bytes) {
         if (deadline > 0) {
-            if (clock_gettime(CLOCK_REALTIME, &time) != -1) {
+            if (clock_gettime(CLOCK_MONOTONIC, &time) != -1) {
                 // If current time is greater than the time defined in deadline
                 if (timespec_to_milliseconds(&time) > deadline) {
                     env->ReleaseByteArrayElements(dataArray, data, 0);
@@ -392,6 +398,7 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_readNative(JNIEnv *en
         // `bytes` on the 2nd+ iteration would write past the end of the buffer.
         int ret = read(fd, current, bytes - bytesRead);
         if (ret == -1) {
+            if (errno == EINTR) continue; // Interrupted by signal, retry the read
             int errnoBackup = errno;
             env->ReleaseByteArrayElements(dataArray, data, 0);
             if (checkJniException(env)) return NULL;
@@ -436,7 +443,7 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_sendNative(JNIEnv *en
     if (checkJniException(env)) return NULL;
     while (bytes > 0) {
         if (deadline > 0) {
-            if (clock_gettime(CLOCK_REALTIME, &time) != -1) {
+            if (clock_gettime(CLOCK_MONOTONIC, &time) != -1) {
                 // If current time is greater than the time defined in deadline
                 if (timespec_to_milliseconds(&time) > deadline) {
                     env->ReleaseByteArrayElements(dataArray, data, JNI_ABORT);
@@ -454,6 +461,7 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_sendNative(JNIEnv *en
         // Send data to socket
         int ret = send(fd, current, bytes, MSG_NOSIGNAL);
         if (ret == -1) {
+            if (errno == EINTR) continue; // Interrupted by signal, retry the send
             int errnoBackup = errno;
             env->ReleaseByteArrayElements(dataArray, data, JNI_ABORT);
             if (checkJniException(env)) return NULL;

@@ -1,5 +1,7 @@
 package com.termux.shared.net.socket.local;
 
+import android.os.SystemClock;
+
 import androidx.annotation.NonNull;
 
 import com.termux.shared.data.DataUtils;
@@ -33,7 +35,7 @@ public class LocalClientSocket implements Closeable {
      */
     protected int mFD;
 
-    /** The creation time of {@link LocalClientSocket}. This is also used for deadline. */
+    /** The creation time of {@link LocalClientSocket} in milliseconds since boot (monotonic). This is also used for deadline. */
     protected final long mCreationTime;
 
     /** The {@link PeerCred} of the {@link LocalClientSocket} containing info of client/peer. */
@@ -55,7 +57,7 @@ public class LocalClientSocket implements Closeable {
     LocalClientSocket(@NonNull LocalSocketManager localSocketManager, int fd, @NonNull PeerCred peerCred) {
         mLocalSocketManager = localSocketManager;
         mLocalSocketRunConfig = localSocketManager.getLocalSocketRunConfig();
-        mCreationTime = System.currentTimeMillis();
+        mCreationTime = SystemClock.elapsedRealtime();
         mOutputStream = new SocketOutputStream();
         mInputStream = new SocketInputStream();
         mPeerCred = peerCred;
@@ -270,7 +272,7 @@ public class LocalClientSocket implements Closeable {
                 mLocalSocketRunConfig.getTitle());
         }
 
-        if (checkDeadline && mLocalSocketRunConfig.getDeadline() > 0 && System.currentTimeMillis() > (mCreationTime + mLocalSocketRunConfig.getDeadline())) {
+        if (checkDeadline && mLocalSocketRunConfig.getDeadline() > 0 && SystemClock.elapsedRealtime() > (mCreationTime + mLocalSocketRunConfig.getDeadline())) {
             return null;
         }
 

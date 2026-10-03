@@ -82,8 +82,11 @@ public class LocalSocketManager {
             }
         }
 
-        mIsRunning = true;
-        return mServerSocket.start();
+        mIsRunning = false;
+        Error error = mServerSocket.start();
+        if (error == null)
+            mIsRunning = true;
+        return error;
     }
 
     /**
@@ -184,7 +187,7 @@ public class LocalSocketManager {
      * @param serverTitle The server title used for logging and errors.
      * @param fd The socket fd.
      * @param data The data buffer to read bytes into.
-     * @param deadline The deadline milliseconds since epoch.
+     * @param deadline The deadline in milliseconds since boot (monotonic clock, see SystemClock.elapsedRealtime()).
      * @return Returns the {@link JniResult}. If reading was successful, then {@link JniResult#retval}
      * will be 0 and {@link JniResult#intData} will contain the bytes read.
      */
@@ -208,7 +211,7 @@ public class LocalSocketManager {
      * @param serverTitle The server title used for logging and errors.
      * @param fd The socket fd.
      * @param data The data buffer containing bytes to send.
-     * @param deadline The deadline milliseconds since epoch.
+     * @param deadline The deadline in milliseconds since boot (monotonic clock, see SystemClock.elapsedRealtime()).
      * @return Returns the {@link JniResult}. If sending was successful, then {@link JniResult#retval}
      * will be 0.
      */
