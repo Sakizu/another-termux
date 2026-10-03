@@ -251,35 +251,49 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
 
             if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN || unicodeChar == 'n'/* next */) {
                 mTermuxTerminalSessionActivityClient.switchToSession(true);
+                return true;
             } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP || unicodeChar == 'p' /* previous */) {
                 mTermuxTerminalSessionActivityClient.switchToSession(false);
+                return true;
             } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                 mActivity.getDrawer().openDrawer(Gravity.LEFT);
+                return true;
             } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                 mActivity.getDrawer().closeDrawers();
+                return true;
             } else if (unicodeChar == 'k'/* keyboard */) {
                 onToggleSoftKeyboardRequest();
+                return true;
             } else if (unicodeChar == 'm'/* menu */) {
                 mActivity.getTerminalView().showContextMenu();
+                return true;
             } else if (unicodeChar == 'r'/* rename */) {
                 mTermuxTerminalSessionActivityClient.renameSession(currentSession);
+                return true;
             } else if (unicodeChar == 'c'/* create */) {
                 mTermuxTerminalSessionActivityClient.addNewSession(false, null);
+                return true;
             } else if (unicodeChar == 'u' /* urls */) {
                 showUrlSelection();
+                return true;
             } else if (unicodeChar == 'v') {
                 doPaste();
+                return true;
             } else if (unicodeChar == '+' || e.getUnicodeChar(KeyEvent.META_SHIFT_ON) == '+') {
                 // We also check for the shifted char here since shift may be required to produce '+',
                 // see https://github.com/termux/termux-api/issues/2
                 changeFontSize(true);
+                return true;
             } else if (unicodeChar == '-') {
                 changeFontSize(false);
+                return true;
             } else if (unicodeChar >= '1' && unicodeChar <= '9') {
                 int index = unicodeChar - '1';
                 mTermuxTerminalSessionActivityClient.switchToSession(index);
+                return true;
             }
-            return true;
+            // No shortcut matched, so let the key event through to the terminal program.
+            return false;
         }
 
         return false;
