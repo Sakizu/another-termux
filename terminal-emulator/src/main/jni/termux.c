@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <jni.h>
 #include <signal.h>
@@ -48,6 +49,7 @@ static int create_subprocess(JNIEnv* env,
             ptsname_r(ptm, devname, sizeof(devname))
 #endif
        ) {
+        close(ptm);
         return throw_runtime_exception(env, "Cannot grantpt()/unlockpt()/ptsname_r() on /dev/ptmx");
     }
 
@@ -64,6 +66,7 @@ static int create_subprocess(JNIEnv* env,
 
     pid_t pid = fork();
     if (pid < 0) {
+        close(ptm);
         return throw_runtime_exception(env, "Fork failed");
     } else if (pid > 0) {
         *pProcessId = (int) pid;
@@ -138,6 +141,7 @@ JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_createSubprocess(
             if (!arg_utf8) return throw_runtime_exception(env, "GetStringUTFChars() failed for argv");
             argv[i] = strdup(arg_utf8);
             (*env)->ReleaseStringUTFChars(env, arg_java_string, arg_utf8);
+            (*env)->DeleteLocalRef(env, arg_java_string);
         }
         argv[size] = NULL;
     }
@@ -153,16 +157,22 @@ JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_createSubprocess(
             if (!env_utf8) return throw_runtime_exception(env, "GetStringUTFChars() failed for env");
             envp[i] = strdup(env_utf8);
             (*env)->ReleaseStringUTFChars(env, env_java_string, env_utf8);
+            (*env)->DeleteLocalRef(env, env_java_string);
         }
         envp[size] = NULL;
     }
 
     int procId = 0;
     char const* cmd_cwd = (*env)->GetStringUTFChars(env, cwd, NULL);
+    if (!cmd_cwd) return throw_runtime_exception(env, "GetStringUTFChars() failed for cwd");
     char const* cmd_utf8 = (*env)->GetStringUTFChars(env, cmd, NULL);
+    if (!cmd_utf8) {
+        (*env)->ReleaseStringUTFChars(env, cwd, cmd_cwd);
+        return throw_runtime_exception(env, "GetStringUTFChars() failed for cmd");
+    }
     int ptm = create_subprocess(env, cmd_utf8, cmd_cwd, argv, envp, &procId, rows, columns, cell_width, cell_height);
     (*env)->ReleaseStringUTFChars(env, cmd, cmd_utf8);
-    (*env)->ReleaseStringUTFChars(env, cmd, cmd_cwd);
+    (*env)->ReleaseStringUTFChars(env, cwd, cmd_cwd);
 
     if (argv) {
         for (char** tmp = argv; *tmp; ++tmp) free(*tmp);
@@ -188,20 +198,14 @@ JNIEXPORT void JNICALL Java_com_termux_terminal_JNI_setPtyWindowSize(JNIEnv* TER
     ioctl(fd, TIOCSWINSZ, &sz);
 }
 
-JNIEXPORT void JNICALL Java_com_termux_terminal_JNI_setPtyUTF8Mode(JNIEnv* TERMUX_UNUSED(env), jclass TERMUX_UNUSED(clazz), jint fd)
-{
-    struct termios tios;
-    tcgetattr(fd, &tios);
-    if ((tios.c_iflag & IUTF8) == 0) {
-        tios.c_iflag |= IUTF8;
-        tcsetattr(fd, TCSANOW, &tios);
-    }
-}
-
 JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_waitFor(JNIEnv* TERMUX_UNUSED(env), jclass TERMUX_UNUSED(clazz), jint pid)
 {
     int status;
-    waitpid(pid, &status, 0);
+    int waited;
+    while ((waited = waitpid(pid, &status, 0)) == -1 && errno == EINTR) ;
+    if (waited == -1) {
+        return -1;
+    }
     if (WIFEXITED(status)) {
         return WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
