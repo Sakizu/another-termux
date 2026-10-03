@@ -14,6 +14,26 @@ import java.util.List;
 public class FileReceiverActivityTest {
 
     @Test
+    public void testIsSafeAttachmentFileName() {
+        // Plain names are accepted.
+        String[] safeNames = {"photo.jpg", "document.txt", "a b (1).pdf", "archive.tar.gz", ".hidden"};
+        for (String name : safeNames) {
+            Assert.assertTrue("expected safe: " + name, FileReceiverActivity.isSafeAttachmentFileName(name));
+        }
+
+        // Traversal / separator / NUL payloads must be rejected so saveStreamWithName
+        // never writes outside the receive dir.
+        String[] unsafeNames = {
+            "../evil.txt", "..\\evil.txt", "../../etc/cron.d/x", "..", "...", "sub/dir/file.txt",
+            "sub\\dir\\file.txt", "/absolute.txt", "evil.txt\0.jpg", "file..txt", null, ""
+        };
+        for (String name : unsafeNames) {
+            Assert.assertFalse("expected rejected: " + (name == null ? "null" : name),
+                FileReceiverActivity.isSafeAttachmentFileName(name));
+        }
+    }
+
+    @Test
     public void testIsSharedTextAnUrl() {
         List<String> validUrls = new ArrayList<>();
         validUrls.add("http://example.com");

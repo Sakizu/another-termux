@@ -198,11 +198,31 @@ public class FileReceiverActivity extends AppCompatActivity {
             });
     }
 
+    /**
+     * A hostile content provider (or a distracted tap on a hostile pre-filled dialog) could supply
+     * a {@code DISPLAY_NAME} like {@code "../evil.txt"} that would escape the receive dir.
+     * Only allow plain file names: no path separators, no parent-directory traversal, no NUL.
+     */
+    static boolean isSafeAttachmentFileName(String fileName) {
+        return fileName != null
+            && !fileName.isEmpty()
+            && fileName.indexOf('/') < 0
+            && fileName.indexOf('\\') < 0
+            && fileName.indexOf('\0') < 0
+            && !fileName.contains("..");
+    }
+
     public File saveStreamWithName(InputStream in, String attachmentFileName) {
         File receiveDir = new File(TERMUX_RECEIVEDIR);
 
         if (DataUtils.isNullOrEmpty(attachmentFileName)) {
             showErrorDialogAndQuit("File name cannot be null or empty");
+            return null;
+        }
+
+        if (!isSafeAttachmentFileName(attachmentFileName)) {
+            showErrorDialogAndQuit("Invalid file name: \"" + attachmentFileName + "\"\n\n"
+                + "File names may not contain path separators or parent-directory references.");
             return null;
         }
 
