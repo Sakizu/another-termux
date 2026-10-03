@@ -68,9 +68,7 @@ public class TerminalToolbarViewPager {
                     TerminalSession session = mActivity.getCurrentSession();
                     if (session != null) {
                         if (session.isRunning()) {
-                            String textToSend = editText.getText().toString();
-                            if (textToSend.length() == 0) textToSend = "\r";
-                            session.write(textToSend);
+                            sendTextInput(session, editText.getText().toString());
                         } else {
                             mActivity.getTermuxTerminalSessionClient().removeFinishedSession(session);
                         }
@@ -86,6 +84,19 @@ public class TerminalToolbarViewPager {
         @Override
         public void destroyItem(@NonNull ViewGroup collection, int position, @NonNull Object view) {
             collection.removeView((View) view);
+        }
+
+        /**
+         * Send the toolbar text-input content to the session through bracketed-paste-aware
+         * handling (upstream issue #5309, security audit F3), mirroring
+         * {@code TermuxTerminalViewClient.doPaste()}: when the running application enabled
+         * DECSET 2004, the text is wrapped in ESC[200~ ... ESC[201~ (and escape/control
+         * characters are stripped, newlines become carriage returns) instead of being
+         * written raw to the session.
+         */
+        public static void sendTextInput(TerminalSession session, String textToSend) {
+            if (textToSend.length() == 0) session.write("\r");
+            else session.getEmulator().paste(textToSend);
         }
 
     }
