@@ -88,8 +88,8 @@ and a `⋮` menu on the right.
   Sessions without a name show a display-only "New session" label in the drawer and in
   toasts; the rename dialog still opens empty and nothing is persisted.
 
-Commits: `e17bd66`, `dc76ea8`, `58da896`, `41d4e57`, `3662e8c` (on top of the earlier
-drawer groundwork: `a95268c`, `d2197d9`, `854947f`, `7b1a181`, `f58ff4a`, `edc7484`).
+Commits: [`e17bd66`](https://github.com/Sakizu/another-termux/commit/e17bd66ef5f67204504b2761422baf0172720178), [`dc76ea8`](https://github.com/Sakizu/another-termux/commit/dc76ea85e4c899099b4b7e59b022245dd7d6dcf1), [`58da896`](https://github.com/Sakizu/another-termux/commit/58da8961dddaea8e38ddaeb222d3638bd068a476), [`41d4e57`](https://github.com/Sakizu/another-termux/commit/41d4e57fbffaaa1740c4eb84b5cefabf11ad16e8), [`3662e8c`](https://github.com/Sakizu/another-termux/commit/3662e8c57c0c65ce5c9c47bcc5a7a44811b0a371) (on top of the earlier
+drawer groundwork: [`a95268c`](https://github.com/Sakizu/another-termux/commit/a95268c40919eeb16aecce4b228a550a4b959c73), [`d2197d9`](https://github.com/Sakizu/another-termux/commit/d2197d9fb51477a36880965409673c0f6275dace), [`854947f`](https://github.com/Sakizu/another-termux/commit/854947f9c7745e328dd9d73a9f3d12665bda3877), [`7b1a181`](https://github.com/Sakizu/another-termux/commit/7b1a18151bca02067729858cfabf53a7054a58b4), [`f58ff4a`](https://github.com/Sakizu/another-termux/commit/f58ff4a57ae07bf6ebc910ab1734bdaf46c547f0), [`edc7484`](https://github.com/Sakizu/another-termux/commit/edc74849808c5fdddcae438cc2f5b8f0c69f6f68)).
 
 ## 3. Immersive Mode
 
@@ -102,25 +102,25 @@ When enabled, the status and navigation bars are hidden with `WindowInsetsContro
 and the window is laid out edge to edge so the terminal fills the freed space. Getting the
 layout right took several iterations:
 
-- `6a3c6f3`: hid the bars on create, resume, and focus gain. The bars hid but the terminal
+- [`6a3c6f3`](https://github.com/Sakizu/another-termux/commit/6a3c6f365ec838809e0426fc3bd200822c62f185): hid the bars on create, resume, and focus gain. The bars hid but the terminal
   did not expand into the freed space.
-- `02001ca`: set `decorFitsSystemWindows` to false while enabled. Still no expansion.
-- `e297b29`: the cause was `android:fitsSystemWindows="true"` on the root view in
+- [`02001ca`](https://github.com/Sakizu/another-termux/commit/02001cac1913c854a453e658f2ede975109af9e7): set `decorFitsSystemWindows` to false while enabled. Still no expansion.
+- [`e297b29`](https://github.com/Sakizu/another-termux/commit/e297b2961d4f92816b06f0554cf1a8efe81a4cde): the cause was `android:fitsSystemWindows="true"` on the root view in
   `activity_termux.xml`, which kept padding the layout for the system-bar areas.
   `setImmersiveMode()` now flips it at runtime and re-applies insets. The terminal
   expanded correctly after this.
-- `5a54a08`: on phones with a punch-hole camera, Android letterboxes the window by default
+- [`5a54a08`](https://github.com/Sakizu/another-termux/commit/5a54a08cb08f3cf160ba4b49a3facd3ba8dc47e5): on phones with a punch-hole camera, Android letterboxes the window by default
   and leaves the status-bar area empty. While immersive mode is on, the cutout mode is set
   to `SHORT_EDGES` so the terminal renders into that area. The camera may cover a character
   or two at the top center; that is the standard tradeoff of true edge-to-edge.
 
-`244219f` later made the whole path idempotent: the insets controller is cached, the
+[`244219f`](https://github.com/Sakizu/another-termux/commit/244219f4888e5369d7cef32e6f53912f1a4ac694) later made the whole path idempotent: the insets controller is cached, the
 last-applied state is tracked, and transition work (insets, cutout mode, `fitsSystemWindows`)
 runs only when the toggle actually changes. While enabled, only the bar-hide is re-applied
 on focus gain. Disabling restores the previous state and re-applies the legacy
 `FLAG_FULLSCREEN` if the `fullscreen` property is set.
 
-## 4. Performance work (`244219f`, 19 files)
+## 4. Performance work ([`244219f`](https://github.com/Sakizu/another-termux/commit/244219f4888e5369d7cef32e6f53912f1a4ac694), 19 files)
 
 One batch, no behavior changes. Each item removes redundant work and keeps the existing
 behavior.
@@ -181,15 +181,15 @@ testing.
 
 ## 6. Verification
 
-APK `another-termux_v0.119.0-beta.3+244219f_arm64-v8a.apk` (CI run for `244219f`, green):
+APK `another-termux_v0.119.0-beta.3+244219f_arm64-v8a.apk` (CI run for [`244219f`](https://github.com/Sakizu/another-termux/commit/244219f4888e5369d7cef32e6f53912f1a4ac694), green):
 
 | Check | Result |
 |---|---|
 | aapt2 badging | `com.termux`, versionCode `1022`, versionName `0.119.0-beta.3+244219f`, label `Termux`, sdkVersion `24`, targetSdkVersion `28`, native-code `arm64-v8a` only |
 | New-code markers in dex | `mImmersiveModeApplied` and `layoutInDisplayCutoutMode` present (all 30 dex files swept) |
-| JNI symbols (readelf) | 14× `Java_com_termux_*`, no renamed symbols (checked on the `f35820c` build; build config unchanged since) |
-| Signature (apksigner) | valid; signer cert is not the AOSP public testkey (checked on `f35820c`) |
-| Launcher icon / bootstrap | stock upstream icon; bootstrap zip valid (checked on `f35820c`) |
+| JNI symbols (readelf) | 14× `Java_com_termux_*`, no renamed symbols (checked on the [`f35820c`](https://github.com/Sakizu/another-termux/commit/f35820c96372c4345007cf7659d3f7e881c0efcb) build; build config unchanged since) |
+| Signature (apksigner) | valid; signer cert is not the AOSP public testkey (checked on [`f35820c`](https://github.com/Sakizu/another-termux/commit/f35820c96372c4345007cf7659d3f7e881c0efcb)) |
+| Launcher icon / bootstrap | stock upstream icon; bootstrap zip valid (checked on [`f35820c`](https://github.com/Sakizu/another-termux/commit/f35820c96372c4345007cf7659d3f7e881c0efcb)) |
 
 ## 7. L4 manual test script (on-device)
 
