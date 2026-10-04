@@ -7,6 +7,7 @@ import androidx.annotation.Keep;
 import androidx.preference.PreferenceDataStore;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceManager;
+import androidx.preference.SwitchPreferenceCompat;
 
 import com.termux.R;
 import com.termux.shared.termux.settings.preferences.TermuxAppSharedPreferences;
@@ -23,6 +24,22 @@ public class TerminalViewPreferencesFragment extends PreferenceFragmentCompat {
         preferenceManager.setPreferenceDataStore(TerminalViewPreferencesDataStore.getInstance(context));
 
         setPreferencesFromResource(R.xml.termux_terminal_view_preferences, rootKey);
+
+        // The two immersive toggles are mutually exclusive: enabling one turns
+        // the other off. setChecked() persists through the DataStore but does
+        // not re-trigger the change listener, so this cannot recurse.
+        SwitchPreferenceCompat immersiveMode = findPreference("immersive_mode");
+        SwitchPreferenceCompat hideBars = findPreference("immersive_hide_bars");
+        if (immersiveMode != null && hideBars != null) {
+            immersiveMode.setOnPreferenceChangeListener((pref, newValue) -> {
+                if (Boolean.TRUE.equals(newValue)) hideBars.setChecked(false);
+                return true;
+            });
+            hideBars.setOnPreferenceChangeListener((pref, newValue) -> {
+                if (Boolean.TRUE.equals(newValue)) immersiveMode.setChecked(false);
+                return true;
+            });
+        }
     }
 
 }
@@ -60,6 +77,9 @@ class TerminalViewPreferencesDataStore extends PreferenceDataStore {
             case "immersive_mode":
                     mPreferences.setImmersiveMode(value);
                 break;
+            case "immersive_hide_bars":
+                    mPreferences.setImmersiveHideBars(value);
+                break;
             default:
                 break;
         }
@@ -74,6 +94,8 @@ class TerminalViewPreferencesDataStore extends PreferenceDataStore {
                 return mPreferences.isTerminalMarginAdjustmentEnabled();
             case "immersive_mode":
                 return mPreferences.isImmersiveModeEnabled();
+            case "immersive_hide_bars":
+                return mPreferences.isImmersiveHideBarsEnabled();
             default:
                 return false;
         }

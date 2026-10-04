@@ -217,11 +217,14 @@
                     If it causes screen flickering on your devices, then disable it. (Default)</string>
 
                 <!-- Immersive Mode -->
-                <string name="termux_terminal_view_immersive_mode_title">Immersive Mode</string>
-                <string name="termux_terminal_view_immersive_mode_off">Immersive mode will be disabled.</string>
-                <string name="termux_terminal_view_immersive_mode_on">Immersive mode will be enabled.
-                    The status and navigation bars will be hidden for a full-screen terminal.
-                    Swipe from the screen edge to reveal them temporarily.</string>
+                <string name="termux_terminal_view_immersive_mode_title">Full immersive mode</string>
+                <string name="termux_terminal_view_immersive_mode_off">Full immersive mode will be disabled.</string>
+                <string name="termux_terminal_view_immersive_mode_on">Full immersive mode will be enabled. The terminal will expand into the freed space.</string>
+
+                <!-- Hide System Bars -->
+                <string name="termux_terminal_view_immersive_hide_bars_title">Hide system bars</string>
+                <string name="termux_terminal_view_immersive_hide_bars_off">The status and navigation bars will be shown.</string>
+                <string name="termux_terminal_view_immersive_hide_bars_on">The status and navigation bars will be hidden without resizing the terminal.</string>
 
 
 

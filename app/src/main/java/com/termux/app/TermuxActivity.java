@@ -126,10 +126,11 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     private WindowInsetsControllerCompat mInsetsController;
 
     /**
-     * The immersive-mode state last applied to the window, or null if never applied.
-     * Used to make {@link #setImmersiveMode()} a no-op when the setting is unchanged.
+     * The immersive-mode state last applied to the window (0 = off, 1 = hide system
+     * bars only, 2 = full immersive), or null if never applied. Used to make
+     * {@link #setImmersiveMode()} a no-op when the setting is unchanged.
      */
-    private Boolean mImmersiveModeApplied;
+    private Integer mImmersiveModeApplied;
 
     /**
      * The active {@link FullScreenWorkAround} instance, or null if the work around
@@ -498,69 +499,96 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     }
 
     /**
-     * Applies immersive mode if enabled in settings: hides the status and
-     * navigation bars for a full-screen terminal. The bars can be revealed
-     * temporarily with an edge swipe. Must be re-applied whenever the window
-     * regains focus, since the system may restore the bars (e.g. after a
-     * dialog is dismissed or the notification shade is pulled down).
+     * Applies the immersive-mode setting, which has two levels: "hide system bars"
+     * only hides the status and navigation bars, while "full immersive mode" also
+     * lays the window out edge-to-edge so the terminal expands into the freed space.
+     * The bars can be revealed temporarily with an edge swipe in full immersive mode.
+     * Must be re-applied whenever the window regains focus, since the system may
+     * restore the bars (e.g. after a dialog is dismissed or the notification shade
+     * is pulled down).
      *
-     * The window is laid out edge-to-edge (decor does not fit system windows)
-     * so the terminal actually expands into the freed space instead of only
-     * hiding the bars. This is only changed while immersive mode is enabled;
-     * the default path leaves the stock window behavior untouched.
+     * Full immersive mode is laid out edge-to-edge (decor does not fit system windows)
+     * so the terminal actually expands into the freed space instead of only hiding
+     * the bars. The hide-bars mode leaves the window layout untouched, so the
+     * framework soft-keyboard resize keeps working exactly like stock. This is only
+     * changed while a mode is active; the off path leaves the stock window behavior
+     * untouched.
      */
     private void setImmersiveMode() {
         if (mPreferences == null) return;
-        boolean enabled = mPreferences.isImmersiveModeEnabled();
+        int mode = getImmersiveModeState();
         if (mInsetsController == null) {
             mInsetsController = new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
         }
-        // Steady state: the setting has not changed since the last call. If immersive
-        // mode is on, re-hide the bars (the system may have restored them while the
+        // Steady state: the setting has not changed since the last call. If a mode
+        // is active, re-hide the bars (the system may have restored them while the
         // window lacked focus); nothing else needs doing.
-        if (mImmersiveModeApplied != null && mImmersiveModeApplied == enabled) {
-            if (enabled) {
+        if (mImmersiveModeApplied != null && mImmersiveModeApplied == mode) {
+            if (mode != 0) {
                 mInsetsController.hide(WindowInsetsCompat.Type.systemBars());
             }
             return;
         }
         // The extra keys resize fix must be re-evaluated whenever the immersive
-        // state actually changes: enabling it needs the fix (edge-to-edge
-        // disables the framework adjustResize), and disabling it must tear the
-        // fix back down.
+        // state actually changes: full immersive mode needs the fix (edge-to-edge
+        // disables the framework adjustResize), and leaving it must tear the fix
+        // back down. The hide-bars mode leaves the layout alone, so the fix is
+        // not needed there.
         FullScreenWorkAround.applyIfNeeded(this);
-        // Render into the display cutout area (punch-hole camera) while immersive,
-        // otherwise Android letterboxes the window and the status bar area stays
-        // empty. Restored to default when the toggle is off.
+        // Restore the stock window state first, then apply the target mode on top
+        // of it. This keeps direct switches between the two modes correct without
+        // either mode needing to know about the other.
+        mInsetsController.show(WindowInsetsCompat.Type.systemBars());
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         WindowManager.LayoutParams attrs = getWindow().getAttributes();
-        attrs.layoutInDisplayCutoutMode = enabled
-            ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+        attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
         getWindow().setAttributes(attrs);
         if (mTermuxActivityRootView != null) {
-            // The root view declares fitsSystemWindows in XML, which would keep
-            // padding the layout for the system bar areas and stop the terminal
-            // from expanding once the bars are hidden.
-            mTermuxActivityRootView.setFitsSystemWindows(!enabled);
+            mTermuxActivityRootView.setFitsSystemWindows(true);
             mTermuxActivityRootView.requestApplyInsets();
         }
-        if (!enabled) {
-            WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-            mInsetsController.show(WindowInsetsCompat.Type.systemBars());
-            // The legacy termux.properties fullscreen=true option relies on the window
-            // fullscreen flag, which the compat show() above may clear on API 24-29.
-            // Re-apply it so the option keeps working when immersive mode is disabled.
-            if (mProperties != null && mProperties.isUsingFullScreen()) {
-                getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-            }
-            mImmersiveModeApplied = false;
-            return;
+        // The legacy termux.properties fullscreen=true option relies on the window
+        // fullscreen flag, which the compat show() above may clear on API 24-29.
+        // Re-apply it after every restore so the option keeps working; harmless
+        // in modes 1/2 where the bars stay hidden via the insets controller.
+        if (mProperties != null && mProperties.isUsingFullScreen()) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         }
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        mInsetsController.setSystemBarsBehavior(
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-        mInsetsController.hide(WindowInsetsCompat.Type.systemBars());
-        mImmersiveModeApplied = true;
+        if (mode == 2) {
+            // Render into the display cutout area (punch-hole camera), otherwise
+            // Android letterboxes the window and the status bar area stays empty.
+            WindowManager.LayoutParams fullAttrs = getWindow().getAttributes();
+            fullAttrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(fullAttrs);
+            if (mTermuxActivityRootView != null) {
+                // The root view declares fitsSystemWindows in XML, which would keep
+                // padding the layout for the system bar areas and stop the terminal
+                // from expanding once the bars are hidden.
+                mTermuxActivityRootView.setFitsSystemWindows(false);
+                mTermuxActivityRootView.requestApplyInsets();
+            }
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+            mInsetsController.setSystemBarsBehavior(
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            mInsetsController.hide(WindowInsetsCompat.Type.systemBars());
+        } else if (mode == 1) {
+            // Hide the bars but leave the decor and root insets alone, so the
+            // layout and keyboard behavior stay stock. Only the cutout mode is
+            // changed, so the punch-hole area does not letterbox.
+            WindowManager.LayoutParams hideBarsAttrs = getWindow().getAttributes();
+            hideBarsAttrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(hideBarsAttrs);
+            mInsetsController.hide(WindowInsetsCompat.Type.systemBars());
+        }
+        mImmersiveModeApplied = mode;
+    }
+
+    /** 0 = off, 1 = hide system bars only, 2 = full immersive. Full wins if both prefs are somehow on. */
+    private int getImmersiveModeState() {
+        if (mPreferences == null) return 0;
+        if (mPreferences.isImmersiveModeEnabled()) return 2;
+        if (mPreferences.isImmersiveHideBarsEnabled()) return 1;
+        return 0;
     }
 
     @Override

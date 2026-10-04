@@ -102,6 +102,14 @@ public class TermuxAppSharedPreferences extends AppSharedPreferences {
         SharedPreferenceUtils.setBoolean(mSharedPreferences, TERMUX_APP.KEY_IMMERSIVE_MODE, value, false);
     }
 
+    public boolean isImmersiveHideBarsEnabled() {
+        return SharedPreferenceUtils.getBoolean(mSharedPreferences, TERMUX_APP.KEY_IMMERSIVE_HIDE_BARS, TERMUX_APP.DEFAULT_IMMERSIVE_HIDE_BARS);
+    }
+
+    public void setImmersiveHideBars(boolean value) {
+        SharedPreferenceUtils.setBoolean(mSharedPreferences, TERMUX_APP.KEY_IMMERSIVE_HIDE_BARS, value, false);
+    }
+
 
 
     public boolean isSoftKeyboardEnabled() {

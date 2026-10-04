@@ -93,14 +93,23 @@ drawer groundwork: [`a95268c`](https://github.com/Sakizu/another-termux/commit/a
 
 ## 3. Immersive Mode
 
-A separate toggle under Settings → Terminal View → Immersive Mode (preference key
-`immersive_mode`, default off). It is independent of the legacy `fullscreen` option in
-`termux.properties`, which keeps working as before. This addresses upstream issue #507
-(fullscreen/immersive mode removed).
+There are now two modes instead of one, chosen by two mutually exclusive toggles under
+Settings → Terminal View. Turning one on turns the other off (the settings UI handles
+that; if both preferences ever end up on anyway, full immersive wins). Both are
+independent of the legacy `fullscreen` option in `termux.properties`, which keeps working
+as before. This addresses upstream issue #507 (fullscreen/immersive mode removed).
 
-When enabled, the status and navigation bars are hidden with `WindowInsetsControllerCompat`
-and the window is laid out edge to edge so the terminal fills the freed space. Getting the
-layout right took several iterations:
+"Hide system bars" (preference key `immersive_hide_bars`, default off) hides the status
+and navigation bars without touching the layout. The terminal keeps its normal size, so
+the framework soft-keyboard resize keeps working exactly like stock and the extra-keys
+resize fix stays out of the way. The cutout mode is still set to `SHORT_EDGES` so the
+punch-hole area does not letterbox.
+
+"Full immersive mode" (preference key `immersive_mode`, unchanged) is the previous
+behavior. The status and navigation bars are hidden with `WindowInsetsControllerCompat`
+and the window is laid out edge to edge so the terminal fills the freed space.
+
+Getting the layout right took several iterations:
 
 - [`6a3c6f3`](https://github.com/Sakizu/another-termux/commit/6a3c6f365ec838809e0426fc3bd200822c62f185): hid the bars on create, resume, and focus gain. The bars hid but the terminal
   did not expand into the freed space.
@@ -119,6 +128,15 @@ last-applied state is tracked, and transition work (insets, cutout mode, `fitsSy
 runs only when the toggle actually changes. While enabled, only the bar-hide is re-applied
 on focus gain. Disabling restores the previous state and re-applies the legacy
 `FLAG_FULLSCREEN` if the `fullscreen` property is set.
+
+The two-mode split itself is an uncommitted working-tree change on top of all this.
+`setImmersiveMode()` now tracks a three-state value (0 = off, 1 = hide bars, 2 = full) and
+restores the stock window state first before applying the target mode, so switching
+directly from one mode to the other works without either mode knowing about the other.
+Steady-state behavior is unchanged: only the bar-hide is re-applied on focus gain, for
+whichever mode is active. `FullScreenWorkAround` was checked and deliberately left alone:
+both its enable gate and the nav-bar compensation key off the full-immersive preference
+only, which is correct since the hide-bars mode needs neither.
 
 ## 4. Performance work ([`244219f`](https://github.com/Sakizu/another-termux/commit/244219f4888e5369d7cef32e6f53912f1a4ac694), 19 files)
 
@@ -202,10 +220,18 @@ information is recorded in this repo.
    handle; switching follows the new order. Open the `⋮` menu on a session: Rename opens the
    stock dialog and the name sticks; Kill asks for confirmation and the row removes itself.
    An unnamed session shows "New session" in the drawer.
-3. Immersive Mode: enable it under Settings → Terminal View. Status and navigation bars hide
-   and the terminal fills the screen, including the area around the camera cutout. Disable it:
-   bars return and the layout returns to normal. Optional: with `fullscreen=true` in
-   `termux.properties`, disabling Immersive Mode keeps the legacy fullscreen behavior.
+3. Immersive Mode (Settings → Terminal View):
+   a. Hide system bars: enable it. The status and navigation bars hide but the terminal
+      keeps its normal size. Open the soft keyboard: the extra keys stay visible and the
+      layout resizes like stock. Disable it: the bars return.
+   b. Full immersive mode: enable it. The bars hide and the terminal fills the screen,
+      including the area around the camera cutout. Open the soft keyboard: the extra
+      keys stay visible (the resize fix is active here). Disable it: the bars return and
+      the layout is back to normal.
+   c. Switch directly from one mode to the other without disabling first: the other
+      toggle turns itself off and the window follows.
+   Optional: with `fullscreen=true` in `termux.properties`, turning both modes off keeps
+   the legacy fullscreen behavior.
 4. Performance: `cat` a large file or generate heavy output; output stays smooth without
    stutter. Typing feels the same as stock; no input lag.
 5. Extra keys, IME input, and plugins behave as stock.

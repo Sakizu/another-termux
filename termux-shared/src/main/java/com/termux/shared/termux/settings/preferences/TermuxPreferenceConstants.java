@@ -107,6 +107,16 @@ public final class TermuxPreferenceConstants {
 
 
         /**
+         * Defines the key for whether to hide the system bars (status and navigation
+         * bars) without changing the layout. Unlike immersive mode, the window is not
+         * laid out edge-to-edge, so the framework soft-keyboard resize keeps working
+         * like stock.
+         */
+        public static final String KEY_IMMERSIVE_HIDE_BARS = "immersive_hide_bars";
+        public static final boolean DEFAULT_IMMERSIVE_HIDE_BARS = false;
+
+
+        /**
          * Defines the key for whether to show terminal toolbar containing extra keys and text input field.
          */
         public static final String KEY_SHOW_TERMINAL_TOOLBAR = "show_extra_keys";

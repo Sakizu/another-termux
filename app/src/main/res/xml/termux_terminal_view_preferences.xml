@@ -16,6 +16,12 @@
             app:summaryOn="@string/termux_terminal_view_immersive_mode_on"
             app:title="@string/termux_terminal_view_immersive_mode_title" />
 
+        <SwitchPreferenceCompat
+            app:key="immersive_hide_bars"
+            app:summaryOff="@string/termux_terminal_view_immersive_hide_bars_off"
+            app:summaryOn="@string/termux_terminal_view_immersive_hide_bars_on"
+            app:title="@string/termux_terminal_view_immersive_hide_bars_title" />
+
     </PreferenceCategory>
 
 </PreferenceScreen>
