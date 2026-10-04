@@ -265,10 +265,15 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         holder.renameField.setVisibility(View.VISIBLE);
         holder.renameField.setText(sessionAtRow.mSessionName);
         holder.renameField.selectAll();
-        holder.renameField.requestFocus();
-        InputMethodManager imm = (InputMethodManager) mActivity.getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (imm != null)
-            imm.showSoftInput(holder.renameField, InputMethodManager.SHOW_IMPLICIT);
+        // Post the focus + keyboard request: calling showSoftInput synchronously here
+        // is unreliable because the view may not be laid out/focused yet, so the
+        // keyboard sometimes never appears.
+        holder.renameField.post(() -> {
+            holder.renameField.requestFocus();
+            InputMethodManager imm = (InputMethodManager) mActivity.getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null)
+                imm.showSoftInput(holder.renameField, InputMethodManager.SHOW_IMPLICIT);
+        });
     }
 
     private void startInlineRename(@NonNull SessionViewHolder holder, int position) {
