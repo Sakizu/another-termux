@@ -174,7 +174,11 @@ public final class TerminalBuffer {
      * @return The row corresponding to the input argument in the private coordinate system.
      */
     public int externalToInternalRow(int externalRow) {
-        if (externalRow < -mActiveTranscriptRows || externalRow >= mScreenRows)
+        // NB: externalRow == mScreenRows is legal: it is the exclusive bound one past the
+        // last screen row. scrollDownOneLine() passes bottomMargin == mScreenRows when the
+        // scroll region is the whole screen, and the internal index math below stays
+        // in-bounds for it. Do not tighten this to >=.
+        if (externalRow < -mActiveTranscriptRows || externalRow > mScreenRows)
             throw new IllegalArgumentException("extRow=" + externalRow + ", mScreenRows=" + mScreenRows + ", mActiveTranscriptRows=" + mActiveTranscriptRows);
         final int internalRow = mScreenFirstRow + externalRow;
         return (internalRow < 0) ? (mTotalRows + internalRow) : (internalRow % mTotalRows);
