@@ -67,6 +67,55 @@ fix described.
 Deferred (documented, not fixed): NUL-as-EOF socket framing (may be intentional protocol),
 abstract-socket bind length, pid-reuse race (inherent), accessibility/UX tradeoffs.
 
+### Round 3 — second comprehensive audit (HIGH → LOW)
+
+A second full audit (Java, native/JNI, resources, build config, services, plus all new
+M8/immersive code) produced 4 HIGH, 16 MEDIUM, and ~50 LOW findings. All confirmed items
+were implemented by 15 file-scoped workers, reviewed line-by-line, then re-verified by
+3 fresh cold reviewers (all passed), and committed as:
+
+- [`ae222c6`](https://github.com/Sakizu/another-termux/commit/ae222c6c123aaf9e8587147a964914e55f49f387)
+  `fix(audit): terminal emulator and view fixes (round 2)` — H1 cursor-blink ghosting
+  (invalidation rect now covers the full block-cursor band), H2 style smearing on rightward
+  copies (style array snapshotted), H3 DECCARA/DECRARA crash (rectangle clamped before
+  `setOrClearEffect`; remotely triggerable via hostile pty output), M1 accessibility
+  throttle (coalesced re-check so the final announcement is never dropped), M2 exit race
+  (teardown reordered: drain → bounded 2 s join → final drain, so trailing output is not
+  lost; the bound avoids an ANR if a daemonized grandchild keeps the pty open), plus
+  TerminalView/TerminalEmulator/TerminalBuffer LOWs.
+- [`f87d820`](https://github.com/Sakizu/another-termux/commit/f87d820)
+  `fix(audit): native JNI hardening (round 2)` — JNI pending-exception and unchecked-class
+  issues in `termux.c`, unchecked `NewByteArray` in bootstrap, `jstring_to_stdstr` NULL
+  check in `local-socket.cpp`, plus native LOWs.
+- [`76c7866`](https://github.com/Sakizu/another-termux/commit/76c7866)
+  `fix(audit): app module fixes (round 2)` — H4 release ABI config (see Build/CI), M3
+  immersive bar-flash gate on mode 1↔2 transitions, M4 drawer active-row cache after drag
+  reorder, M5 lazy nav-bar height query in `FullScreenWorkAround`, M6 recycled drawer-row
+  styling reset, M16 containment in `TermuxOpenReceiver.query()`/`getType()`, plus
+  activity/drawer/receiver/service/resource LOWs.
+- [`8c962fe`](https://github.com/Sakizu/another-termux/commit/8c962fe)
+  `fix(audit): termux-shared fixes (round 2)` — per-command preferences IPC cached,
+  counter synchronization, `ReflectionUtils`/`LocalClientSocket`/`TermuxSession` fixes,
+  plus prefs/socket/misc LOWs.
+
+Findings rejected as false positives (source-verified): a "stale TODO" in
+`TerminalEmulator` that is still load-bearing; removing the `TermuxActivity` kill-tracking
+guard (would regress a real concurrent-exit race); a "redundant length check" at a
+`termux.c` line that does not exist; a `LocalServerSocket` log race with no mutable shared
+state; and "dead" strings/colors/dimens, none provably dead — not deleted. The post-fork
+non-async-signal-safe block in `termux.c` stays untouched (informational, matches upstream).
+
+#### Post-merge regression: scroll crash (found on device, fixed)
+
+The `e39c2d8` build crashed on launch scroll with
+`IllegalArgumentException: extRow=31, mScreenRows=31` from
+`TerminalBuffer.externalToInternalRow` via `scrollDownOneLine`. Root cause: `ae222c6` had
+tightened the guard from `>` to `>=` as a LOW "hardening", but `scrollDownOneLine()`
+legitimately passes `bottomMargin == mScreenRows` (exclusive bound) when the scroll region
+is the whole screen. [`a47cda9`](https://github.com/Sakizu/another-termux/commit/a47cda9)
+restores the upstream check and documents why the inclusive bound is required; the
+resulting build was confirmed working on device.
+
 ## 2. Session drawer overhaul
 
 The drawer is a compact monochrome `RecyclerView`. Each row has a drag handle on the left
@@ -196,6 +245,23 @@ testing.
   evaluation (`No signature of method: …android()`). The hardcoded form configures cleanly.
   Gradle parallel / build-cache flags were also tried and reverted (same evaluation failure);
   left disabled with a comment.
+- The round-3 H4 fix (release `ndk.abiFilters`) initially broke even debug CI: AGP 4.2.2
+  rejects `ndk.abiFilters` whenever `splits.abi.include` is also set, even when splits are
+  disabled. [`da86757`](https://github.com/Sakizu/another-termux/commit/da86757) makes the
+  two mutually exclusive — splits own the filter when enabled (debug/CI, as before), the
+  ndk filter applies only when splits are off (release).
+- Two more round-3 compile errors surfaced in CI (local review could not compile; no
+  Android SDK on the build machine): [`b437d12`](https://github.com/Sakizu/another-termux/commit/b437d12)
+  reworks an illegal `BoundedStringBuilder extends StringBuilder` (`StringBuilder` is
+  final) into `BoundedAppendable implements Appendable`, and
+  [`e39c2d8`](https://github.com/Sakizu/another-termux/commit/e39c2d8) replaces
+  `WindowInsetsControllerCompat.BEHAVIOR_DEFAULT` (only in androidx core 1.7.0+; pinned
+  1.6.0) with `BEHAVIOR_SHOW_BARS_BY_SWIPE` — the official docs confirm it is the same
+  constant renamed, value 1.
+- `.github/workflows/release_verify.yml` ([`ad66146`](https://github.com/Sakizu/another-termux/commit/ad66146),
+  `workflow_dispatch` only): runs `assembleRelease` once with the in-repo debug keystore
+  injected, to prove the release-only `ndk.abiFilters` branch configures, compiles
+  (including ProGuard), and packages. CI normally builds debug only.
 
 ## 6. Verification
 
@@ -208,6 +274,15 @@ APK `another-termux_v0.119.0-beta.3+244219f_arm64-v8a.apk` (CI run for [`244219f
 | JNI symbols (readelf) | 14× `Java_com_termux_*`, no renamed symbols (checked on the [`f35820c`](https://github.com/Sakizu/another-termux/commit/f35820c96372c4345007cf7659d3f7e881c0efcb) build; build config unchanged since) |
 | Signature (apksigner) | valid; signer cert is not the AOSP public testkey (checked on [`f35820c`](https://github.com/Sakizu/another-termux/commit/f35820c96372c4345007cf7659d3f7e881c0efcb)) |
 | Launcher icon / bootstrap | stock upstream icon; bootstrap zip valid (checked on [`f35820c`](https://github.com/Sakizu/another-termux/commit/f35820c96372c4345007cf7659d3f7e881c0efcb)) |
+
+APK `another-termux_v0.119.0-beta.3+a47cda9_arm64-v8a.apk` (CI run for [`a47cda9`](https://github.com/Sakizu/another-termux/commit/a47cda9), green) — includes the full round-3
+audit batch plus the scroll-crash revert:
+
+| Check | Result |
+|---|---|
+| aapt2 badging | `com.termux`, versionCode `1022`, versionName `0.119.0-beta.3+a47cda9`, label `Termux`, sdkVersion `24`, targetSdkVersion `28`, native-code `arm64-v8a` only |
+| Dex sweep | 30 dex files; `clearTranscript` (audit-batch emulator marker) and `immersive_hide_bars` present |
+| On-device | scroll crash from the `e39c2d8` build confirmed fixed |
 
 ## 7. L4 manual test script (on-device)
 
@@ -237,4 +312,5 @@ information is recorded in this repo.
 5. Extra keys, IME input, and plugins behave as stock.
 
 Known UNVERIFIED: split-screen with Immersive Mode on; API 24–29 fullscreen edge cases;
-the deferred round-2 items listed in section 1.
+the deferred round-2 items listed in section 1; the release-only `ndk.abiFilters` branch
+(`release_verify.yml` added — needs a manual trigger from the Actions tab).
