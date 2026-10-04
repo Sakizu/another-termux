@@ -524,16 +524,19 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
 
         final int indexOfSession = service.getIndexOfSession(session);
         if (indexOfSession < 0) return null;
-        StringBuilder toastTitle = new StringBuilder("[" + (indexOfSession + 1) + "]");
+
+        // No session numbering (user request), just name + title.
+        StringBuilder toastTitle = new StringBuilder();
         if (!TextUtils.isEmpty(session.mSessionName)) {
-            toastTitle.append(" ").append(session.mSessionName);
+            toastTitle.append(session.mSessionName);
         }
         String title = session.getTitle();
         if (!TextUtils.isEmpty(title)) {
-            // Space to "[${NR}] or newline after session name:
-            toastTitle.append(session.mSessionName == null ? " " : "\n");
+            if (toastTitle.length() > 0)
+                toastTitle.append("\n");
             toastTitle.append(title);
         }
+        if (toastTitle.length() == 0) return null;
         return toastTitle.toString();
     }
 
