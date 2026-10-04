@@ -149,6 +149,14 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         };
         holder.titleView.setOnClickListener(renameClickListener);
         holder.renameButton.setOnClickListener(renameClickListener);
+        // Long-press on the pencil must not bubble up to the row's long-press
+        // (which opens the rename dialog) — it should also start inline rename.
+        holder.renameButton.setOnLongClickListener(v -> {
+            int position = holder.getBindingAdapterPosition();
+            if (position == RecyclerView.NO_POSITION) return true;
+            startInlineRename(holder, position);
+            return true;
+        });
 
         // IME Done / Enter commits, back cancels, an empty name cancels.
         holder.renameField.setOnEditorActionListener((v, actionId, event) -> {

@@ -16,8 +16,8 @@
         }
       ],
       "versionCode": 1022,
-      "versionName": "0.119.0-beta.3+f35820c",
-      "outputFile": "termux-app_v0.119.0-beta.3+f35820c-apt-android-7-github-debug_arm64-v8a.apk"
+      "versionName": "0.119.0-beta.3+7b1a181",
+      "outputFile": "termux-app_v0.119.0-beta.3+7b1a181-apt-android-7-github-debug_arm64-v8a.apk"
     }
   ]
 }
