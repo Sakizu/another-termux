@@ -536,7 +536,9 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
                 toastTitle.append("\n");
             toastTitle.append(title);
         }
-        if (toastTitle.length() == 0) return null;
+        // Display-only fallback for sessions with no name and no title yet.
+        if (toastTitle.length() == 0)
+            return mActivity.getString(R.string.label_new_session);
         return toastTitle.toString();
     }
 

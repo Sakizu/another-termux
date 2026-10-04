@@ -225,6 +225,12 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         String name = sessionAtRow.mSessionName;
         String sessionTitle = sessionAtRow.getTitle();
 
+        // Display-only fallback: a fresh session may have no name and no
+        // terminal title yet; show a placeholder instead of a blank row.
+        // The placeholder is never stored as the session name.
+        if (TextUtils.isEmpty(name) && TextUtils.isEmpty(sessionTitle))
+            name = mActivity.getString(R.string.label_new_session);
+
         // No session numbering in the drawer (user request) — just name + title.
         String sessionNamePart = (TextUtils.isEmpty(name) ? "" : name);
         String sessionTitlePart = (TextUtils.isEmpty(sessionTitle) ? "" : ((sessionNamePart.isEmpty() ? "" : "\n") + sessionTitle));
