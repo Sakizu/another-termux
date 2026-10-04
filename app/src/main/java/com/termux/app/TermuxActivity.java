@@ -495,6 +495,14 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         boolean enabled = mPreferences.isImmersiveModeEnabled();
         WindowInsetsControllerCompat controller =
             new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
+        // Render into the display cutout area (punch-hole camera) while immersive,
+        // otherwise Android letterboxes the window and the status bar area stays
+        // empty. Restored to default when the toggle is off.
+        WindowManager.LayoutParams attrs = getWindow().getAttributes();
+        attrs.layoutInDisplayCutoutMode = enabled
+            ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+        getWindow().setAttributes(attrs);
         if (mTermuxActivityRootView != null) {
             // The root view declares fitsSystemWindows in XML, which would keep
             // padding the layout for the system bar areas and stop the terminal
