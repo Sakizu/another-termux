@@ -26,6 +26,11 @@ android {
     def apkVersionTag = System.getenv("TERMUX_APK_VERSION_TAG") ?: ""
     def splitAPKsForDebugBuilds = System.getenv("TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS") ?: "1"
     def splitAPKsForReleaseBuilds = System.getenv("TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS") ?: "0" // F-Droid does not support split APKs #1904
+    // AGP 4.2.2 rejects ndk.abiFilters when splits.abi.include is also set, so the two
+    // mechanisms below are mutually exclusive: splits filter the APK when enabled
+    // (debug/CI), the ndk filter restricts the native build when splits are off (release).
+    def splitsEnabled = (gradle.startParameter.taskNames.any { it.contains("Debug") } && splitAPKsForDebugBuilds == "1") ||
+        (gradle.startParameter.taskNames.any { it.contains("Release") } && splitAPKsForReleaseBuilds == "1")
 
     dependencies {
         implementation "androidx.annotation:annotation:1.3.0"
@@ -80,16 +85,22 @@ android {
 
         ndk {
             // arm64-only build: matches the aarch64-only bootstrap zip downloaded below.
-            abiFilters 'arm64-v8a'
+            // Only when splits are off (release); AGP 4.2.2 rejects this together with
+            // splits.abi.include below.
+            if (!splitsEnabled) {
+                abiFilters 'arm64-v8a'
+            }
         }
 
         splits {
             abi {
-                enable ((gradle.startParameter.taskNames.any { it.contains("Debug") } && splitAPKsForDebugBuilds == "1") ||
-                    (gradle.startParameter.taskNames.any { it.contains("Release") } && splitAPKsForReleaseBuilds == "1"))
+                enable splitsEnabled
                 reset ()
                 // arm64-only build: smaller APK, faster CI.
-                include 'arm64-v8a'
+                // Only when splits are on (debug/CI); see the ndk block above.
+                if (splitsEnabled) {
+                    include 'arm64-v8a'
+                }
                 universalApk false
             }
         }
