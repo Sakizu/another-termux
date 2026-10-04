@@ -18,7 +18,12 @@
 
 static int throw_runtime_exception(JNIEnv* env, char const* message)
 {
+    // Do not mask an exception that is already pending (e.g. OutOfMemoryError
+    // from a failed GetStringUTFChars()), and never pass a NULL class to
+    // ThrowNew(), which is undefined behaviour.
+    if ((*env)->ExceptionCheck(env)) return -1;
     jclass exClass = (*env)->FindClass(env, "java/lang/RuntimeException");
+    if (exClass == NULL) return -1; // FindClass() left its own exception pending.
     (*env)->ThrowNew(env, exClass, message);
     return -1;
 }
@@ -139,54 +144,84 @@ JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_createSubprocess(
         jint cell_width,
         jint cell_height)
 {
-    jsize size = args ? (*env)->GetArrayLength(env, args) : 0;
+    if (cmd == NULL || cwd == NULL || processIdArray == NULL)
+        return throw_runtime_exception(env, "Null cmd, cwd or processIdArray argument");
+
+    jint result = -1;
     char** argv = NULL;
+    char** envp = NULL;
+
+    jsize size = args ? (*env)->GetArrayLength(env, args) : 0;
     if (size > 0) {
-        argv = (char**) malloc((size + 1) * sizeof(char*));
-        if (!argv) return throw_runtime_exception(env, "Couldn't allocate argv array");
+        // calloc() zero-initialises the array so the cleanup loop below also
+        // terminates correctly for partially filled arrays on error paths.
+        argv = (char**) calloc(size + 1, sizeof(char*));
+        if (!argv) { throw_runtime_exception(env, "Couldn't allocate argv array"); goto cleanup; }
         for (int i = 0; i < size; ++i) {
             jstring arg_java_string = (jstring) (*env)->GetObjectArrayElement(env, args, i);
-            if (!arg_java_string) return throw_runtime_exception(env, "Null argv element");
+            if (!arg_java_string) { throw_runtime_exception(env, "Null argv element"); goto cleanup; }
             char const* arg_utf8 = (*env)->GetStringUTFChars(env, arg_java_string, NULL);
-            if (!arg_utf8) return throw_runtime_exception(env, "GetStringUTFChars() failed for argv");
+            if (!arg_utf8) {
+                (*env)->DeleteLocalRef(env, arg_java_string);
+                throw_runtime_exception(env, "GetStringUTFChars() failed for argv");
+                goto cleanup;
+            }
             argv[i] = strdup(arg_utf8);
-            if (!argv[i]) return throw_runtime_exception(env, "strdup() failed for argv");
             (*env)->ReleaseStringUTFChars(env, arg_java_string, arg_utf8);
             (*env)->DeleteLocalRef(env, arg_java_string);
+            if (!argv[i]) { throw_runtime_exception(env, "strdup() failed for argv"); goto cleanup; }
         }
         argv[size] = NULL;
     }
 
     size = envVars ? (*env)->GetArrayLength(env, envVars) : 0;
-    char** envp = NULL;
     if (size > 0) {
-        envp = (char**) malloc((size + 1) * sizeof(char *));
-        if (!envp) return throw_runtime_exception(env, "malloc() for envp array failed");
+        envp = (char**) calloc(size + 1, sizeof(char *));
+        if (!envp) { throw_runtime_exception(env, "malloc() for envp array failed"); goto cleanup; }
         for (int i = 0; i < size; ++i) {
             jstring env_java_string = (jstring) (*env)->GetObjectArrayElement(env, envVars, i);
-            if (!env_java_string) return throw_runtime_exception(env, "Null envp element");
+            if (!env_java_string) { throw_runtime_exception(env, "Null envp element"); goto cleanup; }
             char const* env_utf8 = (*env)->GetStringUTFChars(env, env_java_string, 0);
-            if (!env_utf8) return throw_runtime_exception(env, "GetStringUTFChars() failed for env");
+            if (!env_utf8) {
+                (*env)->DeleteLocalRef(env, env_java_string);
+                throw_runtime_exception(env, "GetStringUTFChars() failed for env");
+                goto cleanup;
+            }
             envp[i] = strdup(env_utf8);
-            if (!envp[i]) return throw_runtime_exception(env, "strdup() failed for envp");
             (*env)->ReleaseStringUTFChars(env, env_java_string, env_utf8);
             (*env)->DeleteLocalRef(env, env_java_string);
+            if (!envp[i]) { throw_runtime_exception(env, "strdup() failed for envp"); goto cleanup; }
         }
         envp[size] = NULL;
     }
 
     int procId = 0;
     char const* cmd_cwd = (*env)->GetStringUTFChars(env, cwd, NULL);
-    if (!cmd_cwd) return throw_runtime_exception(env, "GetStringUTFChars() failed for cwd");
+    if (!cmd_cwd) { throw_runtime_exception(env, "GetStringUTFChars() failed for cwd"); goto cleanup; }
     char const* cmd_utf8 = (*env)->GetStringUTFChars(env, cmd, NULL);
     if (!cmd_utf8) {
         (*env)->ReleaseStringUTFChars(env, cwd, cmd_cwd);
-        return throw_runtime_exception(env, "GetStringUTFChars() failed for cmd");
+        throw_runtime_exception(env, "GetStringUTFChars() failed for cmd");
+        goto cleanup;
     }
     int ptm = create_subprocess(env, cmd_utf8, cmd_cwd, argv, envp, &procId, rows, columns, cell_width, cell_height);
     (*env)->ReleaseStringUTFChars(env, cmd, cmd_utf8);
     (*env)->ReleaseStringUTFChars(env, cwd, cmd_cwd);
 
+    // create_subprocess() throws on failure, so an exception may be pending
+    // here. Calling GetPrimitiveArrayCritical() with a pending exception is
+    // undefined behaviour, so bail out first (ptm is -1 on every error path).
+    if ((*env)->ExceptionCheck(env)) goto cleanup;
+
+    int* pProcId = (int*) (*env)->GetPrimitiveArrayCritical(env, processIdArray, NULL);
+    if (!pProcId) { throw_runtime_exception(env, "JNI call GetPrimitiveArrayCritical(processIdArray, &isCopy) failed"); goto cleanup; }
+
+    *pProcId = procId;
+    (*env)->ReleasePrimitiveArrayCritical(env, processIdArray, pProcId, 0);
+
+    result = ptm;
+
+cleanup:
     if (argv) {
         for (char** tmp = argv; *tmp; ++tmp) free(*tmp);
         free(argv);
@@ -195,14 +230,7 @@ JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_createSubprocess(
         for (char** tmp = envp; *tmp; ++tmp) free(*tmp);
         free(envp);
     }
-
-    int* pProcId = (int*) (*env)->GetPrimitiveArrayCritical(env, processIdArray, NULL);
-    if (!pProcId) return throw_runtime_exception(env, "JNI call GetPrimitiveArrayCritical(processIdArray, &isCopy) failed");
-
-    *pProcId = procId;
-    (*env)->ReleasePrimitiveArrayCritical(env, processIdArray, pProcId, 0);
-
-    return ptm;
+    return result;
 }
 
 JNIEXPORT void JNICALL Java_com_termux_terminal_JNI_setPtyWindowSize(JNIEnv* TERMUX_UNUSED(env), jclass TERMUX_UNUSED(clazz), jint fd, jint rows, jint cols, jint cell_width, jint cell_height)
@@ -231,5 +259,6 @@ JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_waitFor(JNIEnv* TERMUX_UNUSE
 
 JNIEXPORT void JNICALL Java_com_termux_terminal_JNI_close(JNIEnv* TERMUX_UNUSED(env), jclass TERMUX_UNUSED(clazz), jint fileDescriptor)
 {
-    close(fileDescriptor);
+    // Ignore invalid descriptors instead of passing them to close().
+    if (fileDescriptor >= 0) close(fileDescriptor);
 }

@@ -92,6 +92,12 @@ static bool initJniCache(JNIEnv *env) {
     env->DeleteLocalRef(classClass);
     if (checkJniException(env) ||
         g_jniResultClass == nullptr || g_stringClass == nullptr || g_classClass == nullptr) {
+        /* Release any global refs that were created before one failed, so a
+         * partial failure does not leak them. DeleteGlobalRef() is safe to
+         * call with the rethrown exception still pending. */
+        if (g_jniResultClass != nullptr) env->DeleteGlobalRef(g_jniResultClass);
+        if (g_stringClass != nullptr) env->DeleteGlobalRef(g_stringClass);
+        if (g_classClass != nullptr) env->DeleteGlobalRef(g_classClass);
         g_jniResultClass = nullptr;
         g_stringClass = nullptr;
         g_classClass = nullptr;
@@ -107,11 +113,13 @@ static bool initJniCache(JNIEnv *env) {
 
 /* Convert a jstring to a std:string. */
 string jstring_to_stdstr(JNIEnv *env, jstring jString) {
+    if (jString == nullptr) return "";
     if (!initJniCache(env)) return "";
     jbyteArray jStringBytesArray = (jbyteArray) env->CallObjectMethod(jString, g_stringGetBytesMethod);
     if (checkJniException(env) || jStringBytesArray == nullptr) return "";
     jsize length = env->GetArrayLength(jStringBytesArray);
     jbyte* jStringBytes = env->GetByteArrayElements(jStringBytesArray, nullptr);
+    if (checkJniException(env) || jStringBytes == nullptr) return "";
     std::string stdString((char *)jStringBytes, length);
     env->ReleaseByteArrayElements(jStringBytesArray, jStringBytes, JNI_ABORT);
     return stdString;
@@ -250,6 +258,9 @@ string getJniResultString(const int retvalParam, const int errnoParam,
 jobject getJniResult(JNIEnv *env, jstring title, const int retvalParam, const int errnoParam,
                      string errmsgParam, const int intDataParam) {
     if (!initJniCache(env)) {
+        /* initJniCache() rethrows the original exception on failure. Bail out
+         * here instead of making more JNI calls with an exception pending. */
+        if (env->ExceptionCheck()) return NULL;
         log_error(get_title_and_message(env, title,
                                         "Failed to resolve cached JniResult class to create object for " +
                                         getJniResultString(retvalParam, errnoParam, errmsgParam, intDataParam)));
@@ -259,7 +270,17 @@ jobject getJniResult(JNIEnv *env, jstring title, const int retvalParam, const in
     if (!errmsgParam.empty())
         errmsgParam = get_title_and_message(env, title, string(errmsgParam));
 
-    jobject obj = env->NewObject(g_jniResultClass, g_jniResultConstructor, retvalParam, errnoParam, env->NewStringUTF(errmsgParam.c_str()), intDataParam);
+    jstring errmsg = env->NewStringUTF(errmsgParam.c_str());
+    if (checkJniException(env)) return NULL;
+    if (errmsg == nullptr) {
+        log_error(get_title_and_message(env, title,
+                                        "Failed to create errmsg string for " +
+                                        getJniResultString(retvalParam, errnoParam, errmsgParam, intDataParam)));
+        return NULL;
+    }
+
+    jobject obj = env->NewObject(g_jniResultClass, g_jniResultConstructor, retvalParam, errnoParam, errmsg, intDataParam);
+    env->DeleteLocalRef(errmsg);
     if (checkJniException(env)) return NULL;
     if (obj == NULL) {
         log_error(get_title_and_message(env, title,
@@ -308,6 +329,72 @@ string setIntField(JNIEnv *env, jobject obj, jclass clazz, const string fieldNam
     return "";
 }
 
+/* Replace invalid UTF-8 sequences with '?', so the result is safe to pass to
+ * NewStringUTF(), which requires modified UTF-8.
+ *
+ * Values set by setStringField() come from raw bytes such as
+ * /proc/[pid]/cmdline, which are not guaranteed to be valid UTF-8. Malformed
+ * input must not reach NewStringUTF(). Embedded NUL bytes are encoded as
+ * 0xC0 0x80 (modified UTF-8) so they do not truncate the string. */
+string sanitize_utf8(const string &str) {
+    string out;
+    out.reserve(str.size());
+    const size_t n = str.size();
+    size_t i = 0;
+    while (i < n) {
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        if (c == 0x00) {
+            out.push_back(static_cast<char>(0xC0));
+            out.push_back(static_cast<char>(0x80));
+            i++;
+            continue;
+        }
+        size_t len;
+        if ((c & 0x80) == 0x00) {
+            len = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            len = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            len = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            len = 4;
+        } else {
+            /* Stray continuation byte or invalid lead byte. */
+            out.push_back('?');
+            i++;
+            continue;
+        }
+        if (i + len > n) {
+            /* Truncated sequence at end of string. */
+            out.push_back('?');
+            i++;
+            continue;
+        }
+        bool valid = true;
+        for (size_t j = 1; j < len; j++) {
+            if ((static_cast<unsigned char>(str[i + j]) & 0xC0) != 0x80) {
+                valid = false;
+                break;
+            }
+        }
+        /* Reject overlong encodings, UTF-16 surrogates and code points above U+10FFFF. */
+        if (valid && len == 2 && c < 0xC2) valid = false;
+        if (valid && len == 3 && c == 0xE0 && static_cast<unsigned char>(str[i + 1]) < 0xA0) valid = false;
+        if (valid && len == 3 && c == 0xED && static_cast<unsigned char>(str[i + 1]) >= 0xA0) valid = false;
+        if (valid && len == 4 && c == 0xF0 && static_cast<unsigned char>(str[i + 1]) < 0x90) valid = false;
+        if (valid && len == 4 && c == 0xF4 && static_cast<unsigned char>(str[i + 1]) > 0x8F) valid = false;
+        if (valid && len == 4 && c > 0xF4) valid = false;
+        if (!valid) {
+            out.push_back('?');
+            i++;
+            continue;
+        }
+        out.append(str, i, len);
+        i += len;
+    }
+    return out;
+}
+
 /* Set String fieldName field for clazz to value. */
 string setStringField(JNIEnv *env, jobject obj, jclass clazz, const string fieldName, const string value) {
     jfieldID field = env->GetFieldID(clazz, fieldName.c_str(), "Ljava/lang/String;");
@@ -317,7 +404,13 @@ string setStringField(JNIEnv *env, jobject obj, jclass clazz, const string field
                get_class_name(env, clazz) + "\" class to set value \"" + value + "\"";
     }
 
-    env->SetObjectField(obj, field, env->NewStringUTF(value.c_str()));
+    jstring jValue = env->NewStringUTF(sanitize_utf8(value).c_str());
+    if (checkJniException(env)) return JNI_EXCEPTION;
+    if (jValue == nullptr) {
+        return "Failed to create String value for \"" + string(fieldName) + "\" field";
+    }
+
+    env->SetObjectField(obj, field, jValue);
     if (checkJniException(env)) return JNI_EXCEPTION;
 
     return "";
@@ -340,6 +433,11 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_createServerSocketNat
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd == -1) {
         return getJniResult(env, logTitle, -1, errno, "createServerSocketNative(): Create local socket failed");
+    }
+
+    if (pathArray == nullptr) {
+        close(fd);
+        return getJniResult(env, logTitle, -1, "createServerSocketNative(): Path passed is null");
     }
 
     jbyte* path = env->GetByteArrayElements(pathArray, nullptr);
@@ -433,6 +531,10 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_readNative(JNIEnv *en
         return getJniResult(env, logTitle, -1, "readNative(): Invalid fd \"" + to_string(fd) + "\" passed");
     }
 
+    if (dataArray == nullptr) {
+        return getJniResult(env, logTitle, -1, "readNative(): data passed is null");
+    }
+
     jbyte* data = env->GetByteArrayElements(dataArray, nullptr);
     if (checkJniException(env)) return NULL;
     if (data == nullptr) {
@@ -498,6 +600,10 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_sendNative(JNIEnv *en
                                                                       jlong deadline) {
     if (fd < 0) {
         return getJniResult(env, logTitle, -1, "sendNative(): Invalid fd \"" + to_string(fd) + "\" passed");
+    }
+
+    if (dataArray == nullptr) {
+        return getJniResult(env, logTitle, -1, "sendNative(): data passed is null");
     }
 
     jbyte* data = env->GetByteArrayElements(dataArray, nullptr);
@@ -640,7 +746,9 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_getPeerCredNative(JNI
     jclass peerCredClazz = env->GetObjectClass(peerCred);
     if (checkJniException(env)) return NULL;
     if (!peerCredClazz) {
-        return getJniResult(env, logTitle, -1, errno, "getPeerCredNative(): Failed to get PeerCred class");
+        /* No errno is set by GetObjectClass(); use the string-only overload so
+         * a stale errno value is not reported. */
+        return getJniResult(env, logTitle, -1, "getPeerCredNative(): Failed to get PeerCred class");
     }
 
     string error;
@@ -686,7 +794,16 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_getPeerCredNative(JNI
 JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
     lock_guard<mutex> lock(g_jniCacheMutex);
     JNIEnv *env = nullptr;
-    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) return;
+    bool attachedHere = false;
+    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_EDETACHED) {
+        /* JNI_OnUnload is not guaranteed to run on an attached thread, and
+         * GetEnv() on an unattached thread just returns JNI_EDETACHED. Attach
+         * the thread so the cached global refs below can be released, then
+         * detach before returning. */
+        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return;
+        attachedHere = true;
+    }
+    if (env == nullptr) return;
     if (g_jniResultClass != nullptr) {
         env->DeleteGlobalRef(g_jniResultClass);
         g_jniResultClass = nullptr;
@@ -703,4 +820,5 @@ JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
     g_stringGetBytesMethod = nullptr;
     g_classGetNameMethod = nullptr;
     g_jniCacheInitialized = false;
+    if (attachedHere) vm->DetachCurrentThread();
 }
