@@ -213,7 +213,19 @@ public class FileReceiverActivity extends AppCompatActivity {
             && fileName.indexOf('/') < 0
             && fileName.indexOf('\\') < 0
             && fileName.indexOf('\0') < 0
-            && !fileName.contains("..");
+            && !isParentDirectorySegment(fileName);
+    }
+
+    /**
+     * Check if any path segment of {@code fileName} is exactly "..". Only a full
+     * ".." segment can traverse out of the receive dir; names that merely contain
+     * two dots like "..." or "a..b" are harmless and must stay allowed.
+     */
+    private static boolean isParentDirectorySegment(String fileName) {
+        for (String segment : fileName.split("[/\\\\]")) {
+            if ("..".equals(segment)) return true;
+        }
+        return false;
     }
 
     public File saveStreamWithName(InputStream in, String attachmentFileName) {

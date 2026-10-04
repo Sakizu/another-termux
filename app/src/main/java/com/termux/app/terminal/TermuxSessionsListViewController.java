@@ -161,6 +161,12 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
             holder.titleView.setVisibility(View.VISIBLE);
             holder.activeMarker.setVisibility(View.INVISIBLE);
             holder.itemView.setActivated(false);
+            // Reset any recycled styling (strikethrough, text color, row
+            // background) so the placeholder row does not inherit it.
+            holder.titleView.setPaintFlags(holder.titleView.getPaintFlags() & ~Paint.STRIKE_THRU_TEXT_FLAG);
+            boolean darkTheme = ThemeUtils.shouldEnableDarkTheme(mActivity, NightMode.getAppNightMode().getName());
+            holder.titleView.setTextColor(darkTheme ? Color.WHITE : Color.BLACK);
+            holder.itemView.setBackground(getSessionRowBackground(darkTheme));
             return;
         }
 
@@ -177,6 +183,17 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         boolean isCurrentSession = currentSession != null && currentSession == sessionAtRow;
         holder.itemView.setActivated(isCurrentSession);
         holder.activeMarker.setVisibility(isCurrentSession ? View.VISIBLE : View.INVISIBLE);
+    }
+
+    @Override
+    public void onViewRecycled(@NonNull SessionViewHolder holder) {
+        // A menu left open on a recycled row would float over the wrong
+        // session, so dismiss it with the row.
+        if (holder.popup != null) {
+            holder.popup.dismiss();
+            holder.popup = null;
+        }
+        super.onViewRecycled(holder);
     }
 
     @Override
@@ -285,7 +302,12 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
     private void showSessionMenu(@NonNull SessionViewHolder holder, int position, @NonNull View anchor) {
         if (getSessionAt(position) == null) return;
 
+        // Only one menu per row at a time; dismissed again on recycle.
+        if (holder.popup != null) {
+            holder.popup.dismiss();
+        }
         PopupMenu popup = new PopupMenu(mActivity, anchor);
+        holder.popup = popup;
         popup.getMenu().add(Menu.NONE, MENU_RENAME_ID, Menu.NONE, R.string.action_rename_session);
         SpannableString killTitle = new SpannableString(mActivity.getString(R.string.action_kill_session));
         killTitle.setSpan(new ForegroundColorSpan(Color.RED), 0, killTitle.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -335,6 +357,8 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         final ImageView dragHandle;
         final TextView titleView;
         final ImageButton menuButton;
+        /** The currently open ⋮ menu for this row, if any. */
+        PopupMenu popup;
 
         SessionViewHolder(@NonNull View itemView) {
             super(itemView);

@@ -137,6 +137,10 @@ public class TermuxOpenReceiver extends BroadcastReceiver {
         public Cursor query(@NonNull Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
             File file = new File(uri.getPath());
 
+            // Contain the path like openFile() does so that permission-holding apps
+            // cannot stat arbitrary app-private files through this method (M16).
+            checkFilePathIsContained(file);
+
             if (projection == null) {
                 projection = new String[]{
                     MediaStore.MediaColumns.DISPLAY_NAME,
@@ -172,6 +176,12 @@ public class TermuxOpenReceiver extends BroadcastReceiver {
 
         @Override
         public String getType(@NonNull Uri uri) {
+            // Contain the path like openFile() does so that permission-holding apps
+            // cannot probe arbitrary app-private paths through this method (M16).
+            // Only the extension is used below, but the check keeps all three
+            // entry points under the same allow-list.
+            checkFilePathIsContained(new File(uri.getPath()));
+
             String path = uri.getLastPathSegment();
             if (path == null) return null;
             int extIndex = path.lastIndexOf('.') + 1;
@@ -201,38 +211,75 @@ public class TermuxOpenReceiver extends BroadcastReceiver {
         @Override
         public ParcelFileDescriptor openFile(@NonNull Uri uri, @NonNull String mode) throws FileNotFoundException {
             File file = new File(uri.getPath());
+            final String path;
             try {
-                String path = file.getCanonicalPath();
-                String callingPackageName = getCallingPackage();
-                Logger.logDebug(LOG_TAG, "Open file request received from " + callingPackageName + " for \"" + path + "\" with mode \"" + mode + "\"");
-                String storagePath = Environment.getExternalStorageDirectory().getCanonicalPath();
-                // See https://support.google.com/faqs/answer/7496913:
-                // Anchor the allow-list on the directory separator so that a sibling directory
-                // like "<files>2/..." cannot pass the prefix check (audit F5).
-                if (!(path.startsWith(TermuxConstants.TERMUX_FILES_DIR_PATH + File.separator) ||
-                      path.startsWith(storagePath + File.separator))) {
-                    throw new IllegalArgumentException("Invalid path: " + path);
-                }
-
-                // If TermuxConstants.PROP_ALLOW_EXTERNAL_APPS property to not set to "true", then throw exception
-                String errmsg = TermuxPluginUtils.checkIfAllowExternalAppsPolicyIsViolated(getContext(), LOG_TAG);
-                if (errmsg != null) {
-                    throw new IllegalArgumentException(errmsg);
-                }
-
-                // **DO NOT** allow these files to be modified by ContentProvider exposed to external
-                // apps, since they may silently modify the values for security properties like
-                // TermuxConstants.PROP_ALLOW_EXTERNAL_APPS set by users without their explicit consent.
-                if (TermuxConstants.TERMUX_PROPERTIES_FILE_PATHS_LIST.contains(path) ||
-                    TermuxConstants.TERMUX_FLOAT_PROPERTIES_FILE_PATHS_LIST.contains(path)) {
-                    mode = "r";
-                }
-
+                path = file.getCanonicalPath();
             } catch (IOException e) {
                 throw new IllegalArgumentException(e);
             }
+            String callingPackageName = getCallingPackage();
+            Logger.logDebug(LOG_TAG, "Open file request received from " + callingPackageName + " for \"" + path + "\" with mode \"" + mode + "\"");
+            checkFilePathIsContained(path);
+
+            // If TermuxConstants.PROP_ALLOW_EXTERNAL_APPS property to not set to "true", then throw exception
+            String errmsg = TermuxPluginUtils.checkIfAllowExternalAppsPolicyIsViolated(getContext(), LOG_TAG);
+            if (errmsg != null) {
+                throw new IllegalArgumentException(errmsg);
+            }
+
+            // **DO NOT** allow these files to be modified by ContentProvider exposed to external
+            // apps, since they may silently modify the values for security properties like
+            // TermuxConstants.PROP_ALLOW_EXTERNAL_APPS set by users without their explicit consent.
+            if (TermuxConstants.TERMUX_PROPERTIES_FILE_PATHS_LIST.contains(path) ||
+                TermuxConstants.TERMUX_FLOAT_PROPERTIES_FILE_PATHS_LIST.contains(path)) {
+                mode = "r";
+            }
 
             return ParcelFileDescriptor.open(file, ParcelFileDescriptor.parseMode(mode));
+        }
+
+        /**
+         * Check that a canonical path is contained within the Termux files directory or
+         * external storage. Used by {@link #query}, {@link #getType} and {@link #openFile}
+         * so that apps holding the provider permission cannot stat, probe or open
+         * arbitrary app-private files (M16).
+         *
+         * @param canonicalPath The canonical path to check.
+         * @throws IllegalArgumentException If the path is outside the allowed directories.
+         */
+        private void checkFilePathIsContained(String canonicalPath) {
+            final String storagePath;
+            try {
+                storagePath = Environment.getExternalStorageDirectory().getCanonicalPath();
+            } catch (IOException e) {
+                throw new IllegalArgumentException(e);
+            }
+            // See https://support.google.com/faqs/answer/7496913:
+            // Anchor the allow-list on the directory separator so that a sibling directory
+            // like "<files>2/..." cannot pass the prefix check (audit F5).
+            if (!(canonicalPath.startsWith(TermuxConstants.TERMUX_FILES_DIR_PATH + File.separator) ||
+                  canonicalPath.startsWith(storagePath + File.separator))) {
+                throw new IllegalArgumentException("Invalid path: " + canonicalPath);
+            }
+        }
+
+        /**
+         * Check that the canonical path of {@code file} is contained within the Termux
+         * files directory or external storage.
+         *
+         * @param file The {@link File} to check.
+         * @return The canonical path of {@code file}.
+         * @throws IllegalArgumentException If the path is outside the allowed directories.
+         */
+        private String checkFilePathIsContained(File file) {
+            final String path;
+            try {
+                path = file.getCanonicalPath();
+            } catch (IOException e) {
+                throw new IllegalArgumentException(e);
+            }
+            checkFilePathIsContained(path);
+            return path;
         }
     }
 

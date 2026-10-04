@@ -78,6 +78,11 @@ android {
             }
         }
 
+        ndk {
+            // arm64-only build: matches the aarch64-only bootstrap zip downloaded below.
+            abiFilters 'arm64-v8a'
+        }
+
         splits {
             abi {
                 enable ((gradle.startParameter.taskNames.any { it.contains("Debug") } && splitAPKsForDebugBuilds == "1") ||

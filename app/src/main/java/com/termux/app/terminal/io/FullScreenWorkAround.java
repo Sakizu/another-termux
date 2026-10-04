@@ -24,9 +24,10 @@ public class FullScreenWorkAround {
     private final Rect mRect = new Rect();
     private final int mOriginalHeight;
 
-    private final int mNavBarHeight;
+    private final TermuxActivity mActivity;
     private final TermuxAppSharedPreferences mPreferences;
     private final ViewTreeObserver.OnGlobalLayoutListener mLayoutListener;
+    private final ViewTreeObserver mViewTreeObserver;
 
 
     /**
@@ -73,10 +74,13 @@ public class FullScreenWorkAround {
         mChildOfContent = content.getChildAt(0);
         mViewGroupLayoutParams = mChildOfContent.getLayoutParams();
         mOriginalHeight = mViewGroupLayoutParams.height;
-        mNavBarHeight = activity.getNavBarHeight();
+        // Do not cache the nav bar height here: this can run before insets
+        // are dispatched (0 forever). It is read lazily in getNavBarHeight().
+        mActivity = activity;
         mPreferences = activity.getPreferences();
         mLayoutListener = this::possiblyResizeChildOfContent;
-        mChildOfContent.getViewTreeObserver().addOnGlobalLayoutListener(mLayoutListener);
+        mViewTreeObserver = mChildOfContent.getViewTreeObserver();
+        mViewTreeObserver.addOnGlobalLayoutListener(mLayoutListener);
     }
 
     /**
@@ -98,7 +102,9 @@ public class FullScreenWorkAround {
      * Remove the work around and restore the content view to its original size.
      */
     public void deactivate() {
-        mChildOfContent.getViewTreeObserver().removeOnGlobalLayoutListener(mLayoutListener);
+        // Removal goes through the cached observer, so it works even if the
+        // view has since been detached (which would return a dead observer).
+        mViewTreeObserver.removeOnGlobalLayoutListener(mLayoutListener);
         mViewGroupLayoutParams.height = mOriginalHeight;
         mChildOfContent.requestLayout();
     }
@@ -131,7 +137,9 @@ public class FullScreenWorkAround {
         if (mPreferences != null && mPreferences.isImmersiveModeEnabled()) {
             return 0;
         }
-        return mNavBarHeight;
+        // Read lazily: the value is only valid once insets have been
+        // dispatched, which may be after this object was constructed.
+        return mActivity.getNavBarHeight();
     }
 
     private int computeUsableHeight() {

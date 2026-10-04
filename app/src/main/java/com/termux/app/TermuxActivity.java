@@ -258,7 +258,11 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
         View content = findViewById(android.R.id.content);
         content.setOnApplyWindowInsetsListener((v, insets) -> {
-            mNavBarHeight = insets.getSystemWindowInsetBottom();
+            // getSystemWindowInsetBottom() is deprecated; the platform replacement
+            // needs API 29+ but this app supports API 21+, so go through the compat
+            // wrapper, which is exactly what the deprecation message prescribes.
+            mNavBarHeight = WindowInsetsCompat.toWindowInsetsCompat(insets)
+                .getInsets(WindowInsetsCompat.Type.navigationBars()).bottom;
             return insets;
         });
 
@@ -492,10 +496,10 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     }
 
     private void setMargins() {
-        LinearLayout relativeLayout = findViewById(R.id.activity_termux_root_relative_layout);
+        LinearLayout linearLayout = findViewById(R.id.activity_termux_root_linear_layout);
         int marginHorizontal = mProperties.getTerminalMarginHorizontal();
         int marginVertical = mProperties.getTerminalMarginVertical();
-        ViewUtils.setLayoutMarginsInDp(relativeLayout, marginHorizontal, marginVertical, marginHorizontal, marginVertical);
+        ViewUtils.setLayoutMarginsInDp(linearLayout, marginHorizontal, marginVertical, marginHorizontal, marginVertical);
     }
 
     /**
@@ -537,22 +541,33 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         FullScreenWorkAround.applyIfNeeded(this);
         // Restore the stock window state first, then apply the target mode on top
         // of it. This keeps direct switches between the two modes correct without
-        // either mode needing to know about the other.
-        mInsetsController.show(WindowInsetsCompat.Type.systemBars());
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-        WindowManager.LayoutParams attrs = getWindow().getAttributes();
-        attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
-        getWindow().setAttributes(attrs);
-        if (mTermuxActivityRootView != null) {
-            mTermuxActivityRootView.setFitsSystemWindows(true);
-            mTermuxActivityRootView.requestApplyInsets();
-        }
-        // The legacy termux.properties fullscreen=true option relies on the window
-        // fullscreen flag, which the compat show() above may clear on API 24-29.
-        // Re-apply it after every restore so the option keeps working; harmless
-        // in modes 1/2 where the bars stay hidden via the insets controller.
-        if (mProperties != null && mProperties.isUsingFullScreen()) {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        // either mode needing to know about the other. Skipped on the very first
+        // call: the window is still stock then, so there is nothing to restore.
+        if (mImmersiveModeApplied != null) {
+            // Only reveal the bars when switching the mode fully off. Revealing
+            // them on a 1<->2 switch would flash the bars on API 30+ before the
+            // target mode hides them again right below.
+            if (mode == 0) {
+                mInsetsController.show(WindowInsetsCompat.Type.systemBars());
+            }
+            // Full immersive mode enables transient-bars-by-swipe below; reset it
+            // here so leaving mode 2 restores the stock behavior as well.
+            mInsetsController.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_DEFAULT);
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+            WindowManager.LayoutParams attrs = getWindow().getAttributes();
+            attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+            getWindow().setAttributes(attrs);
+            if (mTermuxActivityRootView != null) {
+                mTermuxActivityRootView.setFitsSystemWindows(true);
+                mTermuxActivityRootView.requestApplyInsets();
+            }
+            // The legacy termux.properties fullscreen=true option relies on the window
+            // fullscreen flag, which the compat show() above may clear on API 24-29.
+            // Re-apply it after every restore so the option keeps working; harmless
+            // in modes 1/2 where the bars stay hidden via the insets controller.
+            if (mProperties != null && mProperties.isUsingFullScreen()) {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            }
         }
         if (mode == 2) {
             // Render into the display cutout area (punch-hole camera), otherwise
@@ -578,6 +593,10 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             WindowManager.LayoutParams hideBarsAttrs = getWindow().getAttributes();
             hideBarsAttrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             getWindow().setAttributes(hideBarsAttrs);
+            // Full immersive mode enables transient-bars-by-swipe; this mode is
+            // not edge-to-edge, so restore the default behavior instead of
+            // leaking the transient one across a 2->1 switch.
+            mInsetsController.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_DEFAULT);
             mInsetsController.hide(WindowInsetsCompat.Type.systemBars());
         }
         mImmersiveModeApplied = mode;

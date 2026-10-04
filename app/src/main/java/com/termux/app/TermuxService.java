@@ -185,6 +185,13 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
     @Override
     public IBinder onBind(Intent intent) {
         Logger.logVerbose(LOG_TAG, "onBind");
+        // This service is only bound in-process by TermuxActivity with an explicit intent,
+        // so refuse binds for any unexpected intent
+        if (intent == null || intent.getComponent() == null ||
+                !TermuxService.class.getName().equals(intent.getComponent().getClassName())) {
+            Logger.logError(LOG_TAG, "Ignoring bind request for unexpected intent");
+            return null;
+        }
         return mBinder;
     }
 
@@ -203,7 +210,11 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
     /** Make service run in foreground mode. */
     private void runStartForeground() {
         setupNotificationChannel();
-        startForeground(TermuxConstants.TERMUX_APP_NOTIFICATION_ID, buildNotification());
+        Notification notification = buildNotification();
+        // Fail fast with a clear error instead of passing a null notification to startForeground()
+        if (notification == null)
+            throw new IllegalStateException("Failed to build notification for TermuxService foreground service");
+        startForeground(TermuxConstants.TERMUX_APP_NOTIFICATION_ID, notification);
     }
 
     /** Make service leave foreground mode. */

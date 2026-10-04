@@ -52,10 +52,13 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
      *  auto-remove does not cover). All access is on the main thread. */
     private final Set<TerminalSession> mKillRequestedSessions = new HashSet<>();
 
-    /** Adapter position of the drawer row currently highlighted as the current
-     *  session, or -1 if none. Used to refresh only the highlight rows instead
-     *  of the whole list. All access is on the main thread. */
-    private int mHighlightedSessionPosition = -1;
+    /** The session whose drawer row is currently highlighted as the current
+     *  session, or null if none. The session object (not its adapter position)
+     *  is tracked so a drag-reorder cannot leave the cached position stale;
+     *  the position is resolved from the service each time the highlight is
+     *  refreshed. Used to refresh only the highlight rows instead of the whole
+     *  list. All access is on the main thread. */
+    private TerminalSession mHighlightedSession;
 
     /** Cached drawer RecyclerView; the drawer view hierarchy is stable for the
      *  activity lifetime, so findViewById is only needed once. */
@@ -509,9 +512,11 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
             return;
         }
         session.finishIfRunning();
-        // Only track the kill if the session is still alive afterwards. A failed
-        // kill (or a session that exited in the meantime) must not leave a stale
-        // entry that would auto-remove the row on a later natural exit.
+        // The kill is asynchronous, so isRunning() is still true right after a
+        // successful SIGKILL and cannot report whether the kill itself worked.
+        // This only filters the race where the shell exited concurrently between
+        // the check above and here: a stale entry for an already-finished session
+        // would silently auto-remove its row on the natural exit.
         if (session.isRunning())
             mKillRequestedSessions.add(session);
     }
@@ -531,8 +536,11 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
         // The adapter highlights the current session in onBindViewHolder, so refresh
         // only the previously and newly highlighted rows instead of the whole list
         // (replaces ListView.setItemChecked).
-        final int oldPosition = mHighlightedSessionPosition;
-        mHighlightedSessionPosition = indexOfSession;
+        // Resolve the previously highlighted row's position now: a drag-reorder
+        // may have moved it since the last refresh, so the row at a cached
+        // position is no longer necessarily the highlighted one.
+        final int oldPosition = mHighlightedSession == null ? -1 : service.getIndexOfSession(mHighlightedSession);
+        mHighlightedSession = session;
         RecyclerView.Adapter<?> adapter = termuxSessionsRecyclerView.getAdapter();
         if (adapter != null) {
             int itemCount = adapter.getItemCount();
@@ -542,9 +550,12 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
                 adapter.notifyItemChanged(indexOfSession);
         }
         // Delay is necessary otherwise sometimes scroll to newly added session does not happen.
-        // Only scroll when the drawer is actually open; the list is hidden otherwise.
-        if (mActivity.getDrawer().isDrawerOpen(Gravity.LEFT))
-            termuxSessionsRecyclerView.postDelayed(() -> termuxSessionsRecyclerView.smoothScrollToPosition(indexOfSession), 1000);
+        // Re-check that the drawer is still open when the runnable fires; the
+        // user may have closed it while the delay elapsed.
+        termuxSessionsRecyclerView.postDelayed(() -> {
+            if (mActivity.getDrawer().isDrawerOpen(Gravity.LEFT))
+                termuxSessionsRecyclerView.smoothScrollToPosition(indexOfSession);
+        }, 1000);
     }
 
 

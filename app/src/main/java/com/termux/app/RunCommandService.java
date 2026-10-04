@@ -45,7 +45,10 @@ public class RunCommandService extends Service {
 
     @Override
     public IBinder onBind(Intent intent) {
-        return mBinder;
+        // This service is only started with startService()/startForegroundService() and no client
+        // binds to it, so refuse all bind requests
+        Logger.logError(LOG_TAG, "Ignoring unexpected bind request");
+        return null;
     }
 
     @Override
@@ -247,7 +250,11 @@ public class RunCommandService extends Service {
     private void runStartForeground() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             setupNotificationChannel();
-            startForeground(TermuxConstants.TERMUX_RUN_COMMAND_NOTIFICATION_ID, buildNotification());
+            Notification notification = buildNotification();
+            // Fail fast with a clear error instead of passing a null notification to startForeground()
+            if (notification == null)
+                throw new IllegalStateException("Failed to build notification for RunCommandService foreground service");
+            startForeground(TermuxConstants.TERMUX_RUN_COMMAND_NOTIFICATION_ID, notification);
         }
     }
 
