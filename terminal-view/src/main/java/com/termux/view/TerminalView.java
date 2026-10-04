@@ -494,6 +494,7 @@ public final class TerminalView extends View {
         if (mEmulator == null) return;
 
         int rowsInHistory = mEmulator.getScreen().getActiveTranscriptRows();
+        int topRowBeforeUpdate = mTopRow;
         if (mTopRow < -rowsInHistory) mTopRow = -rowsInHistory;
 
         if (isSelectingText() || mEmulator.isAutoScrollDisabled()) {
@@ -530,7 +531,43 @@ public final class TerminalView extends View {
 
         mEmulator.clearScrollCounter();
 
-        invalidate();
+        // Dirty-region rendering: repaint only the rows the emulator marked dirty instead of the
+        // whole view. A change of mTopRow above re-maps terminal rows to view pixels, so fall back
+        // to a full invalidate then, exactly as before. The cursor is covered because every cursor
+        // move marks its old and new rows dirty in the emulator; cursor blinking repaints just the
+        // cursor cell separately.
+        boolean allRowsDirty = mEmulator.isAllRowsDirty();
+        int dirtyRowMin = mEmulator.getDirtyRowMin();
+        int dirtyRowMax = mEmulator.getDirtyRowMax();
+
+        if (mRenderer != null) {
+            // The renderer is the only consumer of the dirty rows: consume them only when a
+            // repaint is actually possible, so rows changed before the renderer exists stay
+            // marked and repaint once it does.
+            mEmulator.clearDirtyRows();
+
+            if (allRowsDirty || mTopRow != topRowBeforeUpdate) {
+                invalidate();
+            } else if (dirtyRowMin >= 0) {
+                // Convert the dirty row range to view pixels. Visible row i spans
+                // [mFontLineSpacingAndAscent + i * lineSpacing,
+                //  mFontLineSpacingAndAscent + (i + 1) * lineSpacing), mirroring
+                // TerminalRenderer.render() (see also invalidateCursorCell()).
+                int firstVisibleRow = Math.max(0, dirtyRowMin - mTopRow);
+                int lastVisibleRow = Math.min(mEmulator.mRows - 1, dirtyRowMax - mTopRow);
+                if (firstVisibleRow <= lastVisibleRow) {
+                    float lineSpacing = mRenderer.getFontLineSpacing();
+                    float ascent = mRenderer.mFontLineSpacingAndAscent;
+                    invalidate(0,
+                        (int) (ascent + firstVisibleRow * lineSpacing),
+                        getWidth(),
+                        (int) Math.ceil(ascent + (lastVisibleRow + 1) * lineSpacing));
+                }
+            }
+            // else: no row changed - nothing to repaint.
+        }
+        // else: no renderer yet - leave the dirty rows marked for the next update.
+
         if (mAccessibilityEnabled) updateContentDescriptionThrottled();
     }
 

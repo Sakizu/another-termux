@@ -265,6 +265,96 @@ public final class TerminalEmulator {
     /** If automatic scrolling of terminal is disabled */
     private boolean mAutoScrollDisabled;
 
+    /**
+     * Dirty-row tracking for dirty-region rendering (see {@link com.termux.view.TerminalView#onScreenUpdated()}).
+     *
+     * <p>Every mutation of visible screen state widens the inclusive range {@link #mDirtyRowMin}..{@link #mDirtyRowMax}
+     * (or sets {@link #mAllRowsDirty} when the affected rows cannot be narrowed down cheaply and safely).
+     * The view reads and clears the range once per screen update and repaints only those rows instead of the whole
+     * view.
+     *
+     * <p>The iron invariant: over-estimating the dirty range is always safe (it only costs a repaint),
+     * under-estimating it is display corruption. Any mutation path whose affected rows are uncertain therefore calls
+     * {@link #markAllDirty()}.
+     *
+     * <p>Threading: every screen mutation ({@link #append(byte[], int)} via the session's main-thread handler,
+     * {@link #resize(int, int, int, int)} and {@link #reset()} from the UI thread) and every read (the view's
+     * {@code onScreenUpdated()}, also on the UI thread) happens on Android's main thread, so plain fields are
+     * sufficient - the handler message dispatch establishes happens-before between the writes performed while
+     * draining pty input and the read that follows in the same message. No locking is used; screen state must not
+     * be mutated from any other thread.
+     */
+    private int mDirtyRowMin = -1;
+    private int mDirtyRowMax = -1;
+    private boolean mAllRowsDirty = false;
+
+    /** Mark a single visible screen row as needing repaint. Out-of-screen rows are ignored. */
+    private void markRowDirty(int row) {
+        markRowsDirty(row, row);
+    }
+
+    /**
+     * Mark the inclusive row range as needing repaint, clamped to the visible screen.
+     * An empty or fully out-of-screen range is ignored.
+     */
+    private void markRowsDirty(int fromRow, int toRow) {
+        if (mAllRowsDirty) return;
+        if (fromRow > toRow) return;
+        if (toRow < 0 || fromRow >= mRows) return;
+        if (fromRow < 0) fromRow = 0;
+        if (toRow >= mRows) toRow = mRows - 1;
+        if (mDirtyRowMin < 0) {
+            mDirtyRowMin = fromRow;
+            mDirtyRowMax = toRow;
+        } else {
+            if (fromRow < mDirtyRowMin) mDirtyRowMin = fromRow;
+            if (toRow > mDirtyRowMax) mDirtyRowMax = toRow;
+        }
+    }
+
+    /**
+     * Mark the whole visible screen as needing repaint. Used when the affected rows are uncertain, complex,
+     * or screen-wide: alternate buffer switch, resize, reset, palette or reverse-video changes.
+     */
+    private void markAllDirty() {
+        mAllRowsDirty = true;
+        mDirtyRowMin = 0;
+        mDirtyRowMax = mRows - 1;
+    }
+
+    /** Whether {@link #markAllDirty()} was called since the last {@link #clearDirtyRows()}. */
+    public boolean isAllRowsDirty() {
+        return mAllRowsDirty;
+    }
+
+    /** First dirty visible row (inclusive), or -1 if no rows are dirty. */
+    public int getDirtyRowMin() {
+        return mDirtyRowMin;
+    }
+
+    /** Last dirty visible row (inclusive), or -1 if no rows are dirty. */
+    public int getDirtyRowMax() {
+        return mDirtyRowMax;
+    }
+
+    /** Clear the dirty-row state. Called by the view after consuming it in {@code onScreenUpdated()}. */
+    public void clearDirtyRows() {
+        mDirtyRowMin = -1;
+        mDirtyRowMax = -1;
+        mAllRowsDirty = false;
+    }
+
+    /**
+     * Re-resolve every palette entry from the current color scheme and mark the whole screen
+     * dirty: already-drawn rows using palette colors change appearance, so a full repaint is
+     * required. External callers must use this instead of touching {@code mColors} directly,
+     * so the visible mutation is never left unmarked.
+     */
+    public void resetColors() {
+        mColors.reset();
+        markAllDirty();
+    }
+
     private byte mUtf8ToFollow, mUtf8Index;
     private final byte[] mUtf8InputBuffer = new byte[4];
     private int mLastEmittedCodePoint = -1;
@@ -411,6 +501,9 @@ public final class TerminalEmulator {
         }
 
         resizeScreen();
+
+        // Resizing reflows and potentially rewrites every row - repaint everything.
+        markAllDirty();
     }
 
     private void resizeScreen() {
@@ -445,6 +538,9 @@ public final class TerminalEmulator {
             mCursorStyle = DEFAULT_TERMINAL_CURSOR_STYLE;
         else
             mCursorStyle = cursorStyle;
+
+        // The cursor glyph shape may have changed - repaint the cursor row.
+        markRowDirty(mCursorRow);
     }
 
     public boolean isReverseVideo() {
@@ -465,6 +561,9 @@ public final class TerminalEmulator {
 
     public void setCursorBlinkingEnabled(boolean cursorBlinkingEnabled) {
         this.mCursorBlinkingEnabled = cursorBlinkingEnabled;
+        // Toggling blinking changes cursor visibility (steady vs blinking) - repaint the cursor row.
+        // The blink runnable itself repaints just the cursor cell when it toggles (see TerminalView).
+        markRowDirty(mCursorRow);
     }
 
     public void setCursorBlinkState(boolean cursorBlinkState) {
@@ -609,6 +708,7 @@ public final class TerminalEmulator {
                 // the first cells are created with a red background, but when tabbing over
                 // them again with a green background they are not overwritten.
                 mCursorCol = nextTabStop(1);
+                markRowDirty(mCursorRow);
                 break;
             case 10: // Line feed (LF, \n).
             case 11: // Vertical tab (VT, \v).
@@ -710,6 +810,8 @@ public final class TerminalEmulator {
                                 int heightToCopy = Math.min(mRows - destionationTop, bottomSource - topSource);
                                 int widthToCopy = Math.min(mColumns - destinationLeft, rightSource - leftSource);
                                 mScreen.blockCopy(leftSource, topSource, widthToCopy, heightToCopy, destinationLeft, destionationTop);
+                                // Only the destination rectangle changed (the cursor does not move for DECCRA).
+                                markRowsDirty(destionationTop, destionationTop + heightToCopy - 1);
                                 break;
                             case '{': // ${CSI}${TOP}${LEFT}${BOTTOM}${RIGHT}${"
                                 // Selective erase rectangular area (DECSERA - http://www.vt100.net/docs/vt510-rm/DECSERA).
@@ -737,6 +839,8 @@ public final class TerminalEmulator {
                                         for (int col = left - 1; col < right; col++)
                                             if (!selective || (TextStyle.decodeEffect(mScreen.getStyleAt(row, col)) & TextStyle.CHARACTER_ATTRIBUTE_PROTECTED) == 0)
                                                 mScreen.setChar(col, row, fillChar, keepVisualAttributes ? mScreen.getStyleAt(row, col) : style);
+                                    // The loop above wrote rows [top - 1, bottom).
+                                    markRowsDirty(top - 1, bottom - 1);
                                 }
                                 break;
                             case 'r': // "${CSI}${TOP}${LEFT}${BOTTOM}${RIGHT}${ATTRIBUTES}$r"
@@ -796,6 +900,8 @@ public final class TerminalEmulator {
                                                 effectiveLeftMargin, effectiveRightMargin, top, left, bottom, right);
                                         }
                                     }
+                                    // setOrClearEffect() rewrote styles on rows [top, bottom).
+                                    markRowsDirty(top, bottom - 1);
                                 } else {
                                     // Do nothing.
                                 }
@@ -833,6 +939,9 @@ public final class TerminalEmulator {
                             int columnsToDelete = Math.min(getArg0(1), columnsAfterCursor);
                             int columnsToMove = columnsAfterCursor - columnsToDelete;
                             mScreen.blockCopy(mCursorCol + columnsToDelete, 0, columnsToMove, mRows, mCursorCol, 0);
+                            // Every row shifted left. Unlike DECIC above there is no blockClear here,
+                            // so mark the affected rows explicitly.
+                            markRowsDirty(0, mRows - 1);
                         } else {
                             unknownSequence(b);
                         }
@@ -889,6 +998,8 @@ public final class TerminalEmulator {
                                         mCursorStyle = TERMINAL_CURSOR_STYLE_BAR;
                                         break;
                                 }
+                                // The cursor glyph shape may have changed - repaint the cursor row.
+                                markRowDirty(mCursorRow);
                                 break;
                             case 't':
                             case 'u':
@@ -1146,6 +1257,8 @@ public final class TerminalEmulator {
                             mScreen.setChar(col, row, fillChar, style);
                     }
                 }
+                // Selective erase touched rows [startRow, endRow); ignored when no valid arg was given.
+                markRowsDirty(startRow, endRow - 1);
                 break;
             case 'h':
             case 'l':
@@ -1213,7 +1326,8 @@ public final class TerminalEmulator {
                 break;
             case 4: // DECSCLM-Scrolling Mode. Ignore.
                 break;
-            case 5: // Reverse video. No action.
+            case 5: // Reverse video - inverts the whole screen, so everything must be repainted.
+                markAllDirty();
                 break;
             case 6: // Set: Origin Mode. Reset: Normal Cursor Mode. Ansi name: DECOM.
                 if (setting) setCursorPosition(0, 0);
@@ -1222,7 +1336,9 @@ public final class TerminalEmulator {
             case 8: // Auto-repeat Keys (DECARM). Do not implement.
             case 9: // X10 mouse reporting - outdated. Do not implement.
             case 12: // Control cursor blinking - ignore.
-            case 25: // Hide/show cursor - no action needed, renderer will check with shouldCursorBeVisible().
+            case 25: // Hide/show cursor - renderer will check with shouldCursorBeVisible().
+                // The cursor glyph appears/disappears on the cursor row.
+                markRowDirty(mCursorRow);
                 if (mClient != null)
                     mClient.onTerminalCursorStateChange(setting);
                 break;
@@ -1259,6 +1375,8 @@ public final class TerminalEmulator {
                 // Reset: Use Normal Screen Buffer and restore cursor as in DECRC.
                 TerminalBuffer newScreen = setting ? mAltBuffer : mMainBuffer;
                 if (newScreen != mScreen) {
+                    // Switching buffers replaces the entire visible content.
+                    markAllDirty();
                     boolean resized = !(newScreen.mColumns == mColumns && newScreen.mScreenRows == mRows);
                     if (setting) saveCursor();
                     mScreen = newScreen;
@@ -1402,6 +1520,7 @@ public final class TerminalEmulator {
         switch (b) {
             case '8': // Esc # 8 - DEC screen alignment test - fill screen with E's.
                 mScreen.blockSet(0, 0, mColumns, mRows, 'E', getStyle());
+                markRowsDirty(0, mRows - 1);
                 break;
             default:
                 unknownSequence(b);
@@ -1424,10 +1543,12 @@ public final class TerminalEmulator {
             case '6': // Back index (http://www.vt100.net/docs/vt510-rm/DECBI). Move left, insert blank column if start.
                 if (mCursorCol > mLeftMargin) {
                     mCursorCol--;
+                    markRowDirty(mCursorRow);
                 } else {
                     int rows = mBottomMargin - mTopMargin;
                     mScreen.blockCopy(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin - 1, rows, mLeftMargin + 1, mTopMargin);
                     mScreen.blockSet(mLeftMargin, mTopMargin, 1, rows, ' ', TextStyle.encode(mForeColor, mBackColor, 0));
+                    markRowsDirty(mTopMargin, mBottomMargin - 1);
                 }
                 break;
             case '7': // DECSC save cursor - http://www.vt100.net/docs/vt510-rm/DECSC
@@ -1439,10 +1560,12 @@ public final class TerminalEmulator {
             case '9': // Forward Index (http://www.vt100.net/docs/vt510-rm/DECFI). Move right, insert blank column if end.
                 if (mCursorCol < mRightMargin - 1) {
                     mCursorCol++;
+                    markRowDirty(mCursorRow);
                 } else {
                     int rows = mBottomMargin - mTopMargin;
                     mScreen.blockCopy(mLeftMargin + 1, mTopMargin, mRightMargin - mLeftMargin - 1, rows, mLeftMargin, mTopMargin);
                     mScreen.blockSet(mRightMargin - 1, mTopMargin, 1, rows, ' ', TextStyle.encode(mForeColor, mBackColor, 0));
+                    markRowsDirty(mTopMargin, mBottomMargin - 1);
                 }
                 break;
             case 'c': // RIS - Reset to Initial State (http://vt100.net/docs/vt510-rm/RIS).
@@ -1470,8 +1593,11 @@ public final class TerminalEmulator {
                 if (mCursorRow <= mTopMargin) {
                     mScreen.blockCopy(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin, mBottomMargin - (mTopMargin + 1), mLeftMargin, mTopMargin + 1);
                     blockClear(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin);
+                    markRowsDirty(mTopMargin, mBottomMargin - 1);
                 } else {
+                    int reverseIndexFromRow = mCursorRow;
                     mCursorRow--;
+                    markRowsDirty(mCursorRow, reverseIndexFromRow);
                 }
                 break;
             case 'N': // SS2, ignore.
@@ -1605,6 +1731,8 @@ public final class TerminalEmulator {
                         break;
                     case 3: // Delete all lines saved in the scrollback buffer (xterm etc)
                         mMainBuffer.clearTranscript();
+                        // The transcript is gone; if the user was viewing it the whole viewport changes.
+                        markAllDirty();
                         break;
                     default:
                         unknownSequence(b);
@@ -1636,6 +1764,8 @@ public final class TerminalEmulator {
                 int linesToMove = linesAfterCursor - linesToInsert;
                 mScreen.blockCopy(0, mCursorRow, mColumns, linesToMove, 0, mCursorRow + linesToInsert);
                 blockClear(0, mCursorRow, mColumns, linesToInsert);
+                // Rows below the cursor moved down (blockClear above only marked the inserted ones).
+                markRowsDirty(mCursorRow, mBottomMargin - 1);
             }
             break;
             case 'M': // "${CSI}${N}M" - delete N lines (DL).
@@ -1646,6 +1776,8 @@ public final class TerminalEmulator {
                 int linesToMove = linesAfterCursor - linesToDelete;
                 mScreen.blockCopy(0, mCursorRow + linesToDelete, mColumns, linesToMove, 0, mCursorRow);
                 blockClear(0, mCursorRow + linesToMove, mColumns, linesToDelete);
+                // Rows below the cursor moved up (blockClear above only marked the blanked tail).
+                markRowsDirty(mCursorRow, mBottomMargin - 1);
             }
             break;
             case 'P': // "${CSI}{N}P" - delete ${N} characters (DCH).
@@ -1680,6 +1812,8 @@ public final class TerminalEmulator {
                     final int linesToScroll = Math.min(linesBetweenTopAndBottomMargins, linesToScrollArg);
                     mScreen.blockCopy(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin, linesBetweenTopAndBottomMargins - linesToScroll, mLeftMargin, mTopMargin + linesToScroll);
                     blockClear(mLeftMargin, mTopMargin, mRightMargin - mLeftMargin, linesToScroll);
+                    // Rows inside the margins moved down (blockClear above only marked the exposed top rows).
+                    markRowsDirty(mTopMargin, mBottomMargin - 1);
                 } else {
                     // "${CSI}${func};${startx};${starty};${firstrow};${lastrow}T" - initiate highlight mouse tracking.
                     unimplementedSequence(b);
@@ -1688,6 +1822,7 @@ public final class TerminalEmulator {
             case 'X': // "${CSI}${N}X" - Erase ${N:=1} character(s) (ECH). FIXME: Clears character attributes?
                 mAboutToAutoWrap = false;
                 mScreen.blockSet(mCursorCol, mCursorRow, Math.min(getArg0(1), mColumns - mCursorCol), 1, ' ', getStyle());
+                markRowDirty(mCursorRow);
                 break;
             case 'Z': // Cursor Backward Tabulation (CBT). Move the active position n tabs backward.
                 int numberOfTabs = getArg0(1);
@@ -1700,6 +1835,7 @@ public final class TerminalEmulator {
                         }
                     }
                 mCursorCol = newCol;
+                markRowDirty(mCursorRow);
                 break;
             case '?': // Esc [ ? -- start of a private parameter byte
                 continueSequence(ESC_CSI_QUESTIONMARK);
@@ -2048,6 +2184,8 @@ public final class TerminalEmulator {
                 // If a "?" is given rather than a name or RGB specification, xterm replies with a control sequence of the
                 // same form which can be used to set the corresponding color. Because more than one pair of color number
                 // and specification can be given in one control sequence, xterm can make more than one reply.
+                // Palette change affects already-drawn rows referencing these colors - repaint everything.
+                markAllDirty();
                 int colorIndex = -1;
                 int parsingPairStart = -1;
                 for (int i = 0; ; i++) {
@@ -2081,6 +2219,8 @@ public final class TerminalEmulator {
             case 10: // Set foreground color.
             case 11: // Set background color.
             case 12: // Set cursor color.
+                // Palette change affects already-drawn rows - repaint everything.
+                markAllDirty();
                 int specialIndex = TextStyle.COLOR_INDEX_FOREGROUND + (value - 10);
                 int lastSemiIndex = 0;
                 for (int charIndex = 0; ; charIndex++) {
@@ -2124,6 +2264,8 @@ public final class TerminalEmulator {
                 // resource. Any number of c parameters may be given. These parameters correspond to the ANSI colors 0-7,
                 // their bright versions 8-15, and if supported, the remainder of the 88-color or 256-color table. If no
                 // parameters are given, the entire table will be reset.
+                // Palette change affects already-drawn rows - repaint everything.
+                markAllDirty();
                 if (textParameter.isEmpty()) {
                     mColors.reset();
                     mSession.onColorsChanged();
@@ -2149,6 +2291,8 @@ public final class TerminalEmulator {
             case 110: // Reset foreground color.
             case 111: // Reset background color.
             case 112: // Reset cursor color.
+                // Palette change affects already-drawn rows - repaint everything.
+                markAllDirty();
                 mColors.reset(TextStyle.COLOR_INDEX_FOREGROUND + (value - 110));
                 mSession.onColorsChanged();
                 break;
@@ -2167,6 +2311,7 @@ public final class TerminalEmulator {
 
     private void blockClear(int sx, int sy, int w, int h) {
         mScreen.blockSet(sx, sy, w, h, ' ', getStyle());
+        markRowsDirty(sy, sy + h - 1);
     }
 
     private long getStyle() {
@@ -2220,6 +2365,8 @@ public final class TerminalEmulator {
         } else {
             mScreen.scrollDownOneLine(mTopMargin, mBottomMargin, currentStyle);
         }
+        // Every row inside the scrolling region moved up one line (and the bottom one was blanked).
+        markRowsDirty(mTopMargin, mBottomMargin - 1);
     }
 
     /**
@@ -2465,12 +2612,16 @@ public final class TerminalEmulator {
         if (autoWrap) {
             if (cursorInLastColumn && ((mAboutToAutoWrap && displayWidth == 1) || displayWidth == 2)) {
                 mScreen.setLineWrap(mCursorRow);
+                int wrappedFromRow = mCursorRow;
                 mCursorCol = mLeftMargin;
                 if (mCursorRow + 1 < mBottomMargin) {
                     mCursorRow++;
                 } else {
                     scrollDownOneLine();
                 }
+                // The cursor left its old row (erasing the cursor glyph there) and the new row
+                // gained the cursor; scrolling already marked the region if it happened.
+                markRowsDirty(wrappedFromRow, mCursorRow);
             }
         } else if (cursorInLastColumn && displayWidth == 2) {
             // The behaviour when a wide character is output with cursor in the last column when
@@ -2494,6 +2645,9 @@ public final class TerminalEmulator {
         // TODO: Check if there are thread synchronization issues with mCursorCol and mCursorRow, possibly causing others bugs too.
         if (column < 0) column = 0;
         mScreen.setChar(column, mCursorRow, codePoint, getStyle());
+        // Note: TerminalRow.setChar() may also clear an adjacent half of a wide character, but that
+        // stays within this same row.
+        markRowDirty(mCursorRow);
 
         if (autoWrap && displayWidth > 0)
             mAboutToAutoWrap = (mCursorCol == mRightMargin - displayWidth);
@@ -2502,11 +2656,18 @@ public final class TerminalEmulator {
     }
 
     private void setCursorRow(int row) {
+        // The cursor glyph moves: repaint the old row (to erase it) and the new row (to draw it).
+        // A pure column move stays on the same row and is covered by marking that row.
+        if (mCursorRow != row) {
+            markRowDirty(mCursorRow);
+            markRowDirty(row);
+        }
         mCursorRow = row;
         mAboutToAutoWrap = false;
     }
 
     private void setCursorCol(int col) {
+        if (mCursorCol != col) markRowDirty(mCursorRow);
         mCursorCol = col;
         mAboutToAutoWrap = false;
     }
@@ -2518,8 +2679,16 @@ public final class TerminalEmulator {
 
     /** TODO: Better name, distinguished from {@link #setCursorPosition(int, int)} by not regarding origin mode. */
     private void setCursorRowCol(int row, int col) {
-        mCursorRow = Math.max(0, Math.min(row, mRows - 1));
-        mCursorCol = Math.max(0, Math.min(col, mColumns - 1));
+        int newRow = Math.max(0, Math.min(row, mRows - 1));
+        int newCol = Math.max(0, Math.min(col, mColumns - 1));
+        if (newRow != mCursorRow) {
+            markRowDirty(mCursorRow);
+            markRowDirty(newRow);
+        } else if (newCol != mCursorCol) {
+            markRowDirty(mCursorRow);
+        }
+        mCursorRow = newRow;
+        mCursorCol = newCol;
         mAboutToAutoWrap = false;
     }
 
@@ -2571,6 +2740,10 @@ public final class TerminalEmulator {
 
         mColors.reset();
         mSession.onColorsChanged();
+
+        // Reset changes margins, colors, reverse video, cursor style and tab stops, any of which can
+        // affect already-drawn rows, so conservatively repaint everything.
+        markAllDirty();
     }
 
     public String getSelectedText(int x1, int y1, int x2, int y2) {
