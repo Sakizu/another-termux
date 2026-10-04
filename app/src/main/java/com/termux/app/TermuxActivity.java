@@ -492,9 +492,17 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
      */
     private void setImmersiveMode() {
         if (mPreferences == null) return;
+        boolean enabled = mPreferences.isImmersiveModeEnabled();
         WindowInsetsControllerCompat controller =
             new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
-        if (!mPreferences.isImmersiveModeEnabled()) {
+        if (mTermuxActivityRootView != null) {
+            // The root view declares fitsSystemWindows in XML, which would keep
+            // padding the layout for the system bar areas and stop the terminal
+            // from expanding once the bars are hidden.
+            mTermuxActivityRootView.setFitsSystemWindows(!enabled);
+            mTermuxActivityRootView.requestApplyInsets();
+        }
+        if (!enabled) {
             WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
             controller.show(WindowInsetsCompat.Type.systemBars());
             return;
