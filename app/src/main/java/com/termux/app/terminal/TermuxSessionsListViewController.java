@@ -1,6 +1,7 @@
 package com.termux.app.terminal;
 
 import android.annotation.SuppressLint;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -8,9 +9,11 @@ import android.graphics.Typeface;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
+import android.view.Menu;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,6 +22,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
+import android.widget.PopupMenu;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -28,6 +32,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.termux.R;
 import com.termux.app.TermuxActivity;
+import com.termux.app.TermuxService;
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession;
 import com.termux.shared.theme.NightMode;
 import com.termux.shared.theme.ThemeUtils;
@@ -56,6 +61,9 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
 
     /** Adapter position currently showing the inline rename field, or -1. */
     int mRenamingPosition = -1;
+
+    private static final int MENU_RENAME_ID = 1;
+    private static final int MENU_KILL_ID = 2;
 
     public TermuxSessionsListViewController(TermuxActivity activity, List<TermuxSession> sessionList) {
         this.mActivity = activity;
@@ -122,6 +130,9 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         });
 
         // Row tap switches to the session and closes the drawer.
+        // Row tap switches to the session and closes the drawer.
+        // (The label has no own click listener on purpose so taps anywhere
+        // on the row switch the session; rename lives in the ⋮ menu.)
         holder.itemView.setOnClickListener(v -> {
             int position = holder.getBindingAdapterPosition();
             if (position == RecyclerView.NO_POSITION) return;
@@ -131,31 +142,11 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
             mActivity.getDrawer().closeDrawers();
         });
 
-        // Long-press keeps the rename dialog as a fallback.
-        holder.itemView.setOnLongClickListener(v -> {
-            int position = holder.getBindingAdapterPosition();
-            if (position == RecyclerView.NO_POSITION) return true;
-            TermuxSession selectedSession = getSessionAt(position);
-            if (selectedSession == null || selectedSession.getTerminalSession() == null) return true;
-            mActivity.getTermuxTerminalSessionClient().renameSession(selectedSession.getTerminalSession());
-            return true;
-        });
-
-        // Tapping the label or the pencil starts the inline rename.
-        View.OnClickListener renameClickListener = v -> {
+        // The ⋮ button opens the session menu (Rename / Kill session).
+        holder.menuButton.setOnClickListener(v -> {
             int position = holder.getBindingAdapterPosition();
             if (position == RecyclerView.NO_POSITION) return;
-            startInlineRename(holder, position);
-        };
-        holder.titleView.setOnClickListener(renameClickListener);
-        holder.renameButton.setOnClickListener(renameClickListener);
-        // Long-press on the pencil must not bubble up to the row's long-press
-        // (which opens the rename dialog) — it should also start inline rename.
-        holder.renameButton.setOnLongClickListener(v -> {
-            int position = holder.getBindingAdapterPosition();
-            if (position == RecyclerView.NO_POSITION) return true;
-            startInlineRename(holder, position);
-            return true;
+            showSessionMenu(holder, position, v);
         });
 
         // IME Done / Enter commits, back cancels, an empty name cancels.
@@ -236,14 +227,14 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         String name = sessionAtRow.mSessionName;
         String sessionTitle = sessionAtRow.getTitle();
 
-        String numberPart = "[" + (position + 1) + "] ";
+        // No session numbering in the drawer (user request) — just name + title.
         String sessionNamePart = (TextUtils.isEmpty(name) ? "" : name);
         String sessionTitlePart = (TextUtils.isEmpty(sessionTitle) ? "" : ((sessionNamePart.isEmpty() ? "" : "\n") + sessionTitle));
 
-        String fullSessionTitle = numberPart + sessionNamePart + sessionTitlePart;
+        String fullSessionTitle = sessionNamePart + sessionTitlePart;
         SpannableString fullSessionTitleStyled = new SpannableString(fullSessionTitle);
-        fullSessionTitleStyled.setSpan(boldSpan, 0, numberPart.length() + sessionNamePart.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        fullSessionTitleStyled.setSpan(italicSpan, numberPart.length() + sessionNamePart.length(), fullSessionTitle.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        fullSessionTitleStyled.setSpan(boldSpan, 0, sessionNamePart.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        fullSessionTitleStyled.setSpan(italicSpan, sessionNamePart.length(), fullSessionTitle.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
         sessionTitleView.setTypeface(Typeface.MONOSPACE);
         sessionTitleView.setText(fullSessionTitleStyled);
@@ -265,15 +256,62 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         holder.renameField.setVisibility(View.VISIBLE);
         holder.renameField.setText(sessionAtRow.mSessionName);
         holder.renameField.selectAll();
-        // Post the focus + keyboard request: calling showSoftInput synchronously here
+        // Post the focus + keyboard request: calling showSoftInput synchronously
         // is unreliable because the view may not be laid out/focused yet, so the
-        // keyboard sometimes never appears.
-        holder.renameField.post(() -> {
+        // keyboard sometimes never appears (notably on MIUI). A short delay plus
+        // an explicit forced show is the reliable pattern here.
+        holder.renameField.postDelayed(() -> {
+            if (!holder.renameField.isAttachedToWindow()) return;
             holder.renameField.requestFocus();
             InputMethodManager imm = (InputMethodManager) mActivity.getSystemService(Context.INPUT_METHOD_SERVICE);
             if (imm != null)
-                imm.showSoftInput(holder.renameField, InputMethodManager.SHOW_IMPLICIT);
+                imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, InputMethodManager.HIDE_IMPLICIT_ONLY);
+        }, 200);
+    }
+
+    /** Session ⋮ menu: Rename (inline) and Kill session (red, with confirmation). */
+    private void showSessionMenu(@NonNull SessionViewHolder holder, int position, @NonNull View anchor) {
+        TermuxSession termuxSession = getSessionAt(position);
+        TerminalSession sessionAtRow = termuxSession == null ? null : termuxSession.getTerminalSession();
+        if (sessionAtRow == null) return;
+
+        PopupMenu popup = new PopupMenu(mActivity, anchor);
+        popup.getMenu().add(Menu.NONE, MENU_RENAME_ID, Menu.NONE, R.string.action_rename_session);
+        SpannableString killTitle = new SpannableString(mActivity.getString(R.string.action_kill_session));
+        killTitle.setSpan(new ForegroundColorSpan(Color.RED), 0, killTitle.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        popup.getMenu().add(Menu.NONE, MENU_KILL_ID, Menu.NONE, killTitle);
+        popup.setOnMenuItemClickListener(item -> {
+            int currentPosition = holder.getBindingAdapterPosition();
+            if (currentPosition == RecyclerView.NO_POSITION) return false;
+            int itemId = item.getItemId();
+            if (itemId == MENU_RENAME_ID) {
+                startInlineRename(holder, currentPosition);
+                return true;
+            } else if (itemId == MENU_KILL_ID) {
+                confirmKillSession(currentPosition);
+                return true;
+            }
+            return false;
         });
+        popup.show();
+    }
+
+    /** Confirm then kill (remove) the session. */
+    private void confirmKillSession(int position) {
+        TermuxSession termuxSession = getSessionAt(position);
+        TerminalSession sessionAtRow = termuxSession == null ? null : termuxSession.getTerminalSession();
+        if (sessionAtRow == null) return;
+
+        new AlertDialog.Builder(mActivity)
+            .setIcon(android.R.drawable.ic_dialog_alert)
+            .setMessage(R.string.title_confirm_kill_process)
+            .setPositiveButton(android.R.string.yes, (dialog, which) -> {
+                dialog.dismiss();
+                TermuxService service = mActivity.getTermuxService();
+                if (service != null) service.removeTermuxSession(sessionAtRow);
+            })
+            .setNegativeButton(android.R.string.no, null)
+            .show();
     }
 
     private void startInlineRename(@NonNull SessionViewHolder holder, int position) {
@@ -317,7 +355,7 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         final ImageView dragHandle;
         final TextView titleView;
         final EditText renameField;
-        final ImageButton renameButton;
+        final ImageButton menuButton;
 
         SessionViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -325,7 +363,7 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
             dragHandle = itemView.findViewById(R.id.session_drag_handle);
             titleView = itemView.findViewById(R.id.session_title);
             renameField = itemView.findViewById(R.id.session_rename_field);
-            renameButton = itemView.findViewById(R.id.session_rename_button);
+            menuButton = itemView.findViewById(R.id.session_menu_button);
         }
     }
 

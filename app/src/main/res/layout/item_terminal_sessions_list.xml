@@ -53,12 +53,12 @@
         android:textSize="14sp" />
 
     <ImageButton
-        android:id="@+id/session_rename_button"
+        android:id="@+id/session_menu_button"
         android:layout_width="40dp"
         android:layout_height="40dp"
-        android:src="@drawable/ic_edit"
+        android:src="@drawable/ic_more_vert"
         android:background="?attr/selectableItemBackgroundBorderless"
-        android:contentDescription="@string/title_rename_session"
+        android:contentDescription="@string/desc_session_menu"
         app:tint="?attr/termuxActivityDrawerImageTint" />
 
 </LinearLayout>
