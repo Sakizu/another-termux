@@ -62,6 +62,7 @@ import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
@@ -483,11 +484,22 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
      * temporarily with an edge swipe. Must be re-applied whenever the window
      * regains focus, since the system may restore the bars (e.g. after a
      * dialog is dismissed or the notification shade is pulled down).
+     *
+     * The window is laid out edge-to-edge (decor does not fit system windows)
+     * so the terminal actually expands into the freed space instead of only
+     * hiding the bars. This is only changed while immersive mode is enabled;
+     * the default path leaves the stock window behavior untouched.
      */
     private void setImmersiveMode() {
-        if (mPreferences == null || !mPreferences.isImmersiveModeEnabled()) return;
+        if (mPreferences == null) return;
         WindowInsetsControllerCompat controller =
             new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
+        if (!mPreferences.isImmersiveModeEnabled()) {
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+            controller.show(WindowInsetsCompat.Type.systemBars());
+            return;
+        }
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         controller.setSystemBarsBehavior(
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         controller.hide(WindowInsetsCompat.Type.systemBars());
