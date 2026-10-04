@@ -1,7 +1,10 @@
 # another-termux — Report
 
 Base: `termux/termux-app` at tag `v0.119.0-beta.3`. Branch: `vibecoding`.
-Scope v1: session-drawer overhaul + ported security fixes. Everything else is stock upstream.
+
+What this fork changes: a session-drawer overhaul, a new Immersive Mode setting, and a
+performance pass over the Java layer. Everything else is stock upstream: same package
+(`com.termux`), same app name and icon, same paths, same bootstrap, arm64-v8a only.
 
 ## 1. Audit fixes ported
 
@@ -64,30 +67,105 @@ fix described.
 Deferred (documented, not fixed): NUL-as-EOF socket framing (may be intentional protocol),
 abstract-socket bind length, pid-reuse race (inherent), accessibility/UX tradeoffs.
 
-## 2. Drawer overhaul
+## 2. Session drawer overhaul
 
-The session drawer is now reorderable and renameable, compact monochrome.
+The drawer is a compact monochrome `RecyclerView`. Each row has a drag handle on the left
+and a `⋮` menu on the right.
 
-- `app/build.gradle`: added `androidx.recyclerview:recyclerview:1.2.1`.
-- `app/src/main/res/layout/activity_termux.xml`: drawer's `ListView` replaced with `RecyclerView`.
-- `app/src/main/res/layout/item_terminal_sessions_list.xml`: new compact row — drag handle
-  (left), session label (`[N] name` + title, as before), pencil rename button (right);
-  inline rename `EditText` shown while renaming. Grayscale only, honors the app's dark/light theme.
-- `app/src/main/res/drawable/ic_drag_handle.xml`, `ic_edit.xml`: monochrome icons.
-- `TermuxSessionsListViewController`: rewritten as a `RecyclerView.Adapter`.
-  - Drag handle starts an `ItemTouchHelper` up/down drag; the drop swaps entries in the live
-    service session list, so numbering and session switching follow the new order.
-  - Tapping the label or pencil swaps in the inline rename field; IME Done / Enter commits
-    through the existing `renameSession` path (`TerminalSession.mSessionName`); empty input
-    or Back cancels. Long-press still opens the rename dialog as a fallback.
-  - Row tap switches session and closes the drawer (unchanged); dead sessions keep the
-    strikethrough style (unchanged).
-- `TermuxActivity.setTermuxSessionsListView()`: wires `LinearLayoutManager`, adapter, and
-  the touch helper.
-- `TermuxTerminalSessionActivityClient.renameSessionToName()`: dialog-free rename entry point
-  used by the inline field, followed by a drawer refresh.
+- Dragging the handle reorders sessions through `ItemTouchHelper`. The drop swaps entries
+  in the live service session list, so session switching follows the new order.
+- Tapping a row switches to that session and closes the drawer.
+- The `⋮` menu offers Rename and Kill session. Rename uses the stock `TextInputDialog`
+  (an earlier inline-rename field was removed because keystrokes went to the terminal
+  behind the drawer). Kill is shown in red, asks for confirmation, and uses the stock
+  `finishIfRunning()` semantics; a session killed this way removes its own row automatically.
+- The adapter uses targeted notifications: rows are inserted, removed, or rebound
+  individually, and the active-row highlight updates with `notifyItemChanged` on the old
+  and new positions only. The delayed smooth-scroll to the active session runs only while
+  the drawer is open. Row backgrounds are cached drawables and the dark/light theme is
+  resolved once per bind.
+- Session numbering was removed from row labels and from the session-switch toast.
+  Sessions without a name show a display-only "New session" label in the drawer and in
+  toasts; the rename dialog still opens empty and nothing is persisted.
 
-## 3. Build / CI
+Commits: `e17bd66`, `dc76ea8`, `58da896`, `41d4e57`, `3662e8c` (on top of the earlier
+drawer groundwork: `a95268c`, `d2197d9`, `854947f`, `7b1a181`, `f58ff4a`, `edc7484`).
+
+## 3. Immersive Mode
+
+A separate toggle under Settings → Terminal View → Immersive Mode (preference key
+`immersive_mode`, default off). It is independent of the legacy `fullscreen` option in
+`termux.properties`, which keeps working as before. This addresses upstream issue #507
+(fullscreen/immersive mode removed).
+
+When enabled, the status and navigation bars are hidden with `WindowInsetsControllerCompat`
+and the window is laid out edge to edge so the terminal fills the freed space. Getting the
+layout right took several iterations:
+
+- `6a3c6f3`: hid the bars on create, resume, and focus gain. The bars hid but the terminal
+  did not expand into the freed space.
+- `02001ca`: set `decorFitsSystemWindows` to false while enabled. Still no expansion.
+- `e297b29`: the cause was `android:fitsSystemWindows="true"` on the root view in
+  `activity_termux.xml`, which kept padding the layout for the system-bar areas.
+  `setImmersiveMode()` now flips it at runtime and re-applies insets. The terminal
+  expanded correctly after this.
+- `5a54a08`: on phones with a punch-hole camera, Android letterboxes the window by default
+  and leaves the status-bar area empty. While immersive mode is on, the cutout mode is set
+  to `SHORT_EDGES` so the terminal renders into that area. The camera may cover a character
+  or two at the top center; that is the standard tradeoff of true edge-to-edge.
+
+`244219f` later made the whole path idempotent: the insets controller is cached, the
+last-applied state is tracked, and transition work (insets, cutout mode, `fitsSystemWindows`)
+runs only when the toggle actually changes. While enabled, only the bar-hide is re-applied
+on focus gain. Disabling restores the previous state and re-applies the legacy
+`FLAG_FULLSCREEN` if the `fullscreen` property is set.
+
+## 4. Performance work (`244219f`, 19 files)
+
+One batch, no behavior changes. Each item removes redundant work and keeps the existing
+behavior.
+
+Rendering (`terminal-view`, `terminal-emulator`):
+- PTY output is coalesced: pending `MSG_NEW_INPUT` messages are removed before reposting,
+  and each handled message drains the whole input queue once, so a burst of output produces
+  one update instead of hundreds of append-plus-redraw cycles.
+- The accessibility content description is refreshed at most every 250 ms and only when the
+  text changed (it used to rebuild a full-screen string on every update).
+- Box-drawing glyph (U+2500–U+257F) measurement results are cached; the cache is dropped when
+  the renderer is recreated.
+- Cursor blinking invalidates only the cursor cell rectangle instead of the whole view.
+
+Startup and settings (`app`, `termux-shared`):
+- Font and color files are read and parsed on a background thread; the resulting typeface
+  and colors are applied on the UI thread with a lifecycle guard.
+- The soft-keyboard focus listener is registered once instead of on every resume, and the
+  delayed keyboard runnable is removed before reposting.
+- Error toasts raised from background threads are posted to the main looper (this path
+  could previously crash with no Looper prepared).
+
+Command spawning (`terminal-emulator`, `app`, `termux-shared`):
+- Environment-dump string building is skipped unless verbose logging is on.
+- The app data directory is cached instead of a `PackageManager` IPC per command.
+- The environment-variable validation regex is a static `Pattern`.
+- The plugin run-command environment cache is invalidated on package version change.
+- The haptic-feedback system setting is cached and refreshed through a `ContentObserver`
+  instead of a `Settings.System` IPC per extra-key tap.
+- The "runs since boot" counters use `apply()` instead of synchronous `commit()`.
+
+Layout and native:
+- The inner `RelativeLayout` in `activity_termux.xml` became a `LinearLayout` (same layout,
+  single measure pass).
+- `FindClass`/`GetMethodID` results are cached in `local-socket.cpp`.
+- Dead resources removed (`ic_edit.xml`), plus small cleanups: unused imports, an off-by-one
+  insert guard, cached `findViewById` lookups.
+
+Deliberately not done: per-row dirty-region invalidation needs touched-range tracking inside
+`TerminalEmulator`; a view-side guess would under-invalidate and corrupt the display, so it
+is left for careful follow-up work. The API 24–29 half-immersive edge case needs an emulator
+to verify before touching. The split-screen plus immersive interaction is left for on-device
+testing.
+
+## 5. Build / CI
 
 - `.github/workflows/debug_build.yml`: builds `apt-android-7` + `arm64-v8a` + debug on
   `vibecoding` pushes; pins Java 11 via `setup-java` (AGP 4.2.2 / Gradle 7.2 predate the
@@ -101,28 +179,36 @@ The session drawer is now reorderable and renameable, compact monochrome.
   Gradle parallel / build-cache flags were also tried and reverted (same evaluation failure);
   left disabled with a comment.
 
-## 4. L3 verification (APK `termux-app_v0.119.0-beta.3+f35820c-apt-android-7-github-debug_arm64-v8a.apk`, 35.8 MB)
+## 6. Verification
+
+APK `another-termux_v0.119.0-beta.3+244219f_arm64-v8a.apk` (CI run for `244219f`, green):
 
 | Check | Result |
 |---|---|
-| aapt2 badging | `com.termux`, versionCode `1022`, label `Termux`, sdkVersion `24`, targetSdkVersion `28`, native-code `arm64-v8a` only |
-| `lib/` contents | `arm64-v8a` only: `libtermux.so`, `libtermux-bootstrap.so`, `liblocal-socket.so` |
-| JNI symbols (readelf) | 14× `Java_com_termux_*` (original set), 0× `Java_com_sakizu_*` |
-| Signature (apksigner) | valid; signer cert is not the AOSP public testkey |
-| Launcher icon | stock upstream `ic_launcher` |
-| Bootstrap | `libtermux-bootstrap.so` is a valid zip with 3490 files |
-| Drawer feature | `TermuxSessionsListViewController$SessionViewHolder`, `renameSessionToName` present in dex |
+| aapt2 badging | `com.termux`, versionCode `1022`, versionName `0.119.0-beta.3+244219f`, label `Termux`, sdkVersion `24`, targetSdkVersion `28`, native-code `arm64-v8a` only |
+| New-code markers in dex | `mImmersiveModeApplied` and `layoutInDisplayCutoutMode` present (all 30 dex files swept) |
+| JNI symbols (readelf) | 14× `Java_com_termux_*`, no renamed symbols (checked on the `f35820c` build; build config unchanged since) |
+| Signature (apksigner) | valid; signer cert is not the AOSP public testkey (checked on `f35820c`) |
+| Launcher icon / bootstrap | stock upstream icon; bootstrap zip valid (checked on `f35820c`) |
 
-## 5. L4 manual test script (on-device)
+## 7. L4 manual test script (on-device)
 
-Prerequisites: an arm64 Android 7+ test device with "Install unknown apps" allowed.
+Prerequisites: an arm64 Android 7+ device with "Install unknown apps" allowed. No device
+information is recorded in this repo.
 
-1. `adb install` (or file transfer + tap) the APK from the CI artifact.
-2. Launch: bootstrap installs, welcome text appears, prompt ready. Run `pkg update && pkg upgrade` — must complete with no dpkg errors.
-3. Drawer: open the session drawer (hamburger / edge swipe). Create 3 sessions. Drag session 3 above session 1 via the drag handle — order and `[N]` numbers follow. Tap the pencil on a session, rename inline, press Done — name sticks. Long-press a session — rename dialog still appears.
-4. Kill the app, relaunch — sessions persist per normal Termux behavior.
-5. Extra keys, IME input, and terminal rendering behave as stock (no changes in v1 scope).
-6. Optional: `adb logcat` while renaming/reordering — no exceptions from the drawer code.
+1. Install the APK from the CI artifact. Launch: bootstrap installs, welcome text appears,
+   prompt ready. Run `pkg update && pkg upgrade`; it must complete with no dpkg errors.
+2. Drawer: open the session drawer. Create 3 sessions. Drag one above another with the drag
+   handle; switching follows the new order. Open the `⋮` menu on a session: Rename opens the
+   stock dialog and the name sticks; Kill asks for confirmation and the row removes itself.
+   An unnamed session shows "New session" in the drawer.
+3. Immersive Mode: enable it under Settings → Terminal View. Status and navigation bars hide
+   and the terminal fills the screen, including the area around the camera cutout. Disable it:
+   bars return and the layout returns to normal. Optional: with `fullscreen=true` in
+   `termux.properties`, disabling Immersive Mode keeps the legacy fullscreen behavior.
+4. Performance: `cat` a large file or generate heavy output; output stays smooth without
+   stutter. Typing feels the same as stock; no input lag.
+5. Extra keys, IME input, and plugins behave as stock.
 
-Known UNVERIFIED: on-device behavior of the drawer (needs the L4 run above); the deferred
-round-2 items listed in section 1.
+Known UNVERIFIED: split-screen with Immersive Mode on; API 24–29 fullscreen edge cases;
+the deferred round-2 items listed in section 1.
