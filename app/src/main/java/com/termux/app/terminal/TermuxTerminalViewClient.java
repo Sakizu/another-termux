@@ -90,6 +90,10 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
 
         mActivity.getTerminalView().setTextSize(mActivity.getPreferences().getFontSize());
         mActivity.getTerminalView().setKeepScreenOn(mActivity.getPreferences().shouldKeepScreenOn());
+
+        // Register once: the terminal view instance is stable for the activity
+        // lifetime, so re-registering on every onResume is unnecessary.
+        setTerminalViewFocusChangeListener();
     }
 
     /**
@@ -623,6 +627,26 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
             }
         }
 
+        // Do not force show soft keyboard if termux-reload-settings command was run with hardware keyboard
+        // or soft keyboard is to be hidden or is disabled
+        if (!isReloadTermuxProperties && !noShowKeyboard) {
+            // Request focus for TerminalView
+            // Also show the keyboard, since onFocusChange will not be called if TerminalView already
+            // had focus on startup to show the keyboard, like when opening url with context menu
+            // "Select URL" long press and returning to Termux app with back button. This
+            // will also show keyboard even if it was closed before opening url. #2111
+            Logger.logVerbose(LOG_TAG, "Requesting TerminalView focus and showing soft keyboard");
+            mActivity.getTerminalView().requestFocus();
+            // Drop any pending show-keyboard runnable before re-posting so that
+            // repeated onResume calls do not stack multiple delayed runnables.
+            mActivity.getTerminalView().removeCallbacks(getShowSoftKeyboardRunnable());
+            mActivity.getTerminalView().postDelayed(getShowSoftKeyboardRunnable(), 300);
+        }
+    }
+
+    /** Registered once in {@link #onCreate()}; the terminal view is never
+     *  replaced, so re-registering on every onResume is unnecessary. */
+    private void setTerminalViewFocusChangeListener() {
         mActivity.getTerminalView().setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View view, boolean hasFocus) {
@@ -644,19 +668,6 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
                 KeyboardUtils.setSoftKeyboardVisibility(getShowSoftKeyboardRunnable(), mActivity, mActivity.getTerminalView(), hasFocus || textInputViewHasFocus);
             }
         });
-
-        // Do not force show soft keyboard if termux-reload-settings command was run with hardware keyboard
-        // or soft keyboard is to be hidden or is disabled
-        if (!isReloadTermuxProperties && !noShowKeyboard) {
-            // Request focus for TerminalView
-            // Also show the keyboard, since onFocusChange will not be called if TerminalView already
-            // had focus on startup to show the keyboard, like when opening url with context menu
-            // "Select URL" long press and returning to Termux app with back button. This
-            // will also show keyboard even if it was closed before opening url. #2111
-            Logger.logVerbose(LOG_TAG, "Requesting TerminalView focus and showing soft keyboard");
-            mActivity.getTerminalView().requestFocus();
-            mActivity.getTerminalView().postDelayed(getShowSoftKeyboardRunnable(), 300);
-        }
     }
 
     private Runnable getShowSoftKeyboardRunnable() {

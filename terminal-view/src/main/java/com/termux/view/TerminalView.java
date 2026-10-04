@@ -125,6 +125,14 @@ public final class TerminalView extends View {
 
     private final boolean mAccessibilityEnabled;
 
+    /** Minimum interval between accessibility content-description refreshes. */
+    private static final long CONTENT_DESCRIPTION_UPDATE_INTERVAL_MS = 250;
+
+    /** Last content description pushed for accessibility; skips re-announcing identical text. */
+    private String mLastContentDescription;
+    /** Uptime millis when the content description was last refreshed (throttled). */
+    private long mLastContentDescriptionUpdateTime;
+
     /** The {@link KeyEvent} is generated from a virtual keyboard, like manually with the {@link KeyEvent#KeyEvent(int, int)} constructor. */
     public final static int KEY_EVENT_SOURCE_VIRTUAL_KEYBOARD = KeyCharacterMap.VIRTUAL_KEYBOARD; // -1
 
@@ -523,7 +531,24 @@ public final class TerminalView extends View {
         mEmulator.clearScrollCounter();
 
         invalidate();
-        if (mAccessibilityEnabled) setContentDescription(getText());
+        if (mAccessibilityEnabled) updateContentDescriptionThrottled();
+    }
+
+    /**
+     * Refresh the accessibility content description at most every
+     * {@link #CONTENT_DESCRIPTION_UPDATE_INTERVAL_MS} ms, and only when the text actually
+     * changed. Building the full-screen string and dispatching the accessibility event on
+     * every screen update is expensive during heavy output.
+     */
+    private void updateContentDescriptionThrottled() {
+        long now = SystemClock.uptimeMillis();
+        if (now - mLastContentDescriptionUpdateTime < CONTENT_DESCRIPTION_UPDATE_INTERVAL_MS) return;
+        mLastContentDescriptionUpdateTime = now;
+        String text = getText().toString();
+        if (!text.equals(mLastContentDescription)) {
+            mLastContentDescription = text;
+            setContentDescription(text);
+        }
     }
 
     /** This must be called by the hosting activity in {@link Activity#onContextMenuClosed(Menu)}
@@ -1357,13 +1382,39 @@ public final class TerminalView extends View {
                     mCursorVisible = !mCursorVisible;
                     //mClient.logVerbose(LOG_TAG, "Toggling cursor blink state to " + mCursorVisible);
                     mEmulator.setCursorBlinkState(mCursorVisible);
-                    invalidate();
+                    // Blink state only affects cursor drawing, so just the cursor cell
+                    // needs redrawing instead of the whole view.
+                    invalidateCursorCell();
                 }
             } finally {
                 // Recall the Runnable after mBlinkRate milliseconds to toggle the blink state
                 mTerminalCursorBlinkerHandler.postDelayed(this, mBlinkRate);
             }
         }
+    }
+
+    /**
+     * Invalidate only the cell(s) the cursor occupies instead of the whole view when the
+     * cursor blink state toggles. This is safe because the blink state is only consulted by
+     * {@link TerminalEmulator#shouldCursorBeVisible()}, which only affects cursor drawing.
+     * The rect deliberately over-estimates (one extra cell on each side, full line height)
+     * to cover wide characters under the cursor and every cursor style.
+     */
+    private void invalidateCursorCell() {
+        TerminalEmulator emulator = mEmulator;
+        TerminalRenderer renderer = mRenderer;
+        if (emulator == null || renderer == null) return;
+        int visibleRow = emulator.getCursorRow() - mTopRow;
+        if (visibleRow < 0 || visibleRow >= emulator.mRows) return; // Cursor is scrolled off screen.
+        float fontWidth = renderer.getFontWidth();
+        // Mirror TerminalRenderer.render(): the row at visible index i is drawn with its
+        // baseline at mFontLineSpacingAndAscent + (i + 1) * mFontLineSpacing.
+        float y = renderer.mFontLineSpacingAndAscent + (visibleRow + 1) * renderer.getFontLineSpacing();
+        int cursorCol = emulator.getCursorCol();
+        invalidate((int) ((cursorCol - 1) * fontWidth),
+            (int) (y - renderer.mFontLineSpacingAndAscent),
+            (int) Math.ceil((cursorCol + 2) * fontWidth),
+            (int) Math.ceil(y));
     }
 
 

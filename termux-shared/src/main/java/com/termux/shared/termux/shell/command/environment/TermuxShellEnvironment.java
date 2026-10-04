@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.termux.shared.android.PackageUtils;
 import com.termux.shared.errors.Error;
@@ -31,9 +32,36 @@ public class TermuxShellEnvironment extends AndroidShellEnvironment {
     /** Environment variable for the termux {@link TermuxConstants#TERMUX_PREFIX_DIR_PATH}. */
     public static final String ENV_PREFIX = "PREFIX";
 
+    /**
+     * Cached Termux app `dataDir`, looked up once via {@link PackageManager} (binder IPC).
+     * {@code null} if the lookup failed or the app is disabled, in which case
+     * `TERMUX__APPS_DIR` is not set.
+     */
+    private static volatile String sTermuxAppDataDir;
+    /** Whether {@link #sTermuxAppDataDir} has been looked up yet. */
+    private static volatile boolean sTermuxAppDataDirInitialized;
+
     public TermuxShellEnvironment() {
         super();
         shellCommandShellEnvironment = new TermuxShellCommandShellEnvironment();
+    }
+
+    /**
+     * Get the Termux app `dataDir`, looking it up once via {@link PackageManager} (binder IPC)
+     * and caching it for subsequent calls.
+     *
+     * @param currentPackageContext The {@link Context} for operations.
+     * @return Returns the `dataDir`, or {@code null} if the lookup failed or the app is disabled.
+     */
+    @Nullable
+    private static synchronized String getTermuxAppDataDir(@NonNull Context currentPackageContext) {
+        if (!sTermuxAppDataDirInitialized) {
+            ApplicationInfo applicationInfo = PackageUtils.getApplicationInfoForPackage(currentPackageContext,
+                TermuxConstants.TERMUX_PACKAGE_NAME);
+            sTermuxAppDataDir = (applicationInfo != null && applicationInfo.enabled) ? applicationInfo.dataDir : null;
+            sTermuxAppDataDirInitialized = true;
+        }
+        return sTermuxAppDataDir;
     }
 
 
@@ -80,13 +108,9 @@ public class TermuxShellEnvironment extends AndroidShellEnvironment {
             environment.putAll(termuxApiAppEnvironment);
          */
 
-        ApplicationInfo applicationInfo = PackageUtils.getApplicationInfoForPackage(currentPackageContext, TermuxConstants.TERMUX_PACKAGE_NAME);
-        if (applicationInfo != null && !applicationInfo.enabled) {
-            applicationInfo = null;
-        }
-
-        if (applicationInfo != null) {
-            environment.put("TERMUX__APPS_DIR", applicationInfo.dataDir + "/termux/apps");
+        String termuxAppDataDir = getTermuxAppDataDir(currentPackageContext);
+        if (termuxAppDataDir != null) {
+            environment.put("TERMUX__APPS_DIR", termuxAppDataDir + "/termux/apps");
         }
         environment.put("TERMUX__ROOTFS_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
         environment.put(ENV_HOME, TermuxConstants.TERMUX_HOME_DIR_PATH);

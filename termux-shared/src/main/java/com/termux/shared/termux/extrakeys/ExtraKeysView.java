@@ -2,6 +2,7 @@ package com.termux.shared.termux.extrakeys;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.database.ContentObserver;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -208,6 +209,18 @@ public final class ExtraKeysView extends GridLayout {
     protected SpecialButtonsLongHoldRunnable mSpecialButtonsLongHoldRunnable;
     protected int mLongPressCount;
 
+    /** Cached value of {@link Settings.System#HAPTIC_FEEDBACK_ENABLED}, refreshed by
+     * {@link #refreshHapticFeedbackEnabled()} and {@link #mHapticFeedbackSettingObserver}. */
+    protected boolean mHapticFeedbackEnabled;
+
+    /** Observes {@link Settings.System#HAPTIC_FEEDBACK_ENABLED} to refresh {@link #mHapticFeedbackEnabled}. */
+    private final ContentObserver mHapticFeedbackSettingObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+        @Override
+        public void onChange(boolean selfChange) {
+            refreshHapticFeedbackEnabled();
+        }
+    };
+
 
     public ExtraKeysView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -223,6 +236,30 @@ public final class ExtraKeysView extends GridLayout {
 
         setLongPressTimeout(ViewConfiguration.getLongPressTimeout());
         setLongPressRepeatDelay(DEFAULT_LONG_PRESS_REPEAT_DELAY);
+
+        refreshHapticFeedbackEnabled();
+    }
+
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        getContext().getContentResolver().registerContentObserver(
+            Settings.System.getUriFor(Settings.System.HAPTIC_FEEDBACK_ENABLED), false,
+            mHapticFeedbackSettingObserver);
+        refreshHapticFeedbackEnabled();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        getContext().getContentResolver().unregisterContentObserver(mHapticFeedbackSettingObserver);
+        super.onDetachedFromWindow();
+    }
+
+    /** Refresh {@link #mHapticFeedbackEnabled} from {@link Settings.System#HAPTIC_FEEDBACK_ENABLED}. */
+    private void refreshHapticFeedbackEnabled() {
+        mHapticFeedbackEnabled = Settings.System.getInt(getContext().getContentResolver(),
+            Settings.System.HAPTIC_FEEDBACK_ENABLED, 0) != 0;
     }
 
 
@@ -500,8 +537,7 @@ public final class ExtraKeysView extends GridLayout {
                 return;
         }
 
-        if (Settings.System.getInt(getContext().getContentResolver(),
-            Settings.System.HAPTIC_FEEDBACK_ENABLED, 0) != 0) {
+        if (mHapticFeedbackEnabled) {
 
             if (Build.VERSION.SDK_INT >= 28) {
                 button.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);

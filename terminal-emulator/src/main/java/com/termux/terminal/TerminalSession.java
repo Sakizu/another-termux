@@ -139,6 +139,11 @@ public final class TerminalSession extends TerminalOutput {
                         int read = termIn.read(buffer);
                         if (read == -1) return;
                         if (!mProcessToTerminalIOQueue.write(buffer, 0, read)) return;
+                        // Coalesce rapid pty output: keep at most one MSG_NEW_INPUT queued so a
+                        // burst of reads collapses into fewer append+redraw cycles. Queued bytes
+                        // stay in mProcessToTerminalIOQueue, so the next handled message drains
+                        // everything written since and no output is lost.
+                        mMainThreadHandler.removeMessages(MSG_NEW_INPUT);
                         mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
                     }
                 } catch (Exception e) {
@@ -343,9 +348,17 @@ public final class TerminalSession extends TerminalOutput {
 
         @Override
         public void handleMessage(Message msg) {
-            int bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false);
-            if (bytesRead > 0) {
+            // Drain the queue fully: with coalesced MSG_NEW_INPUT above, more than one
+            // buffer's worth of bytes may be queued, and bytes left behind would have no
+            // pending message to pick them up. One screen update per drain keeps the
+            // append+redraw cost constant regardless of burst size.
+            boolean gotInput = false;
+            int bytesRead;
+            while ((bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false)) > 0) {
                 mEmulator.append(mReceiveBuffer, bytesRead);
+                gotInput = true;
+            }
+            if (gotInput) {
                 notifyScreenUpdate();
             }
 

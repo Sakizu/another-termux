@@ -18,6 +18,7 @@ import com.termux.shared.termux.TermuxUtils;
 import com.termux.shared.termux.shell.am.TermuxAmSocketServer;
 
 import java.util.HashMap;
+import java.util.Objects;
 
 /**
  * Environment for {@link TermuxConstants#TERMUX_PACKAGE_NAME} app.
@@ -26,6 +27,30 @@ public class TermuxAppShellEnvironment {
 
     /** Termux app environment variables. */
     public static HashMap<String, String> termuxAppEnvironment;
+
+    /**
+     * Cached Termux app environment for a non-Termux caller package. The cache entry is
+     * invalidated when the Termux app version changes.
+     */
+    private static class CachedTermuxAppEnvironment {
+        final Integer versionCode;
+        final String versionName;
+        final HashMap<String, String> environment;
+
+        CachedTermuxAppEnvironment(Integer versionCode, String versionName, HashMap<String, String> environment) {
+            this.versionCode = versionCode;
+            this.versionName = versionName;
+            this.environment = environment;
+        }
+    }
+
+    /**
+     * Cache of Termux app environments for non-Termux caller packages, keyed by caller package
+     * name. This avoids the {@link android.content.pm.PackageManager} (binder IPC), signing
+     * certificate SHA-256 and {@link android.app.ActivityManager} lookups on every call for
+     * plugin apps.
+     */
+    private static final HashMap<String, CachedTermuxAppEnvironment> sTermuxAppEnvironmentCache = new HashMap<>();
 
     /** Environment variable root scope. */
     public static final String TERMUX_ENV__S_ROOT = "TERMUX_"; // Default: "TERMUX_"
@@ -93,12 +118,30 @@ public class TermuxAppShellEnvironment {
 
     /** Set Termux app environment variables in {@link #termuxAppEnvironment}. */
     public synchronized static void setTermuxAppEnvironment(@NonNull Context currentPackageContext) {
-        boolean isTermuxApp = TermuxConstants.TERMUX_PACKAGE_NAME.equals(currentPackageContext.getPackageName());
+        String callerPackageName = currentPackageContext.getPackageName();
+        boolean isTermuxApp = TermuxConstants.TERMUX_PACKAGE_NAME.equals(callerPackageName);
 
         // If current package context is of termux app and its environment is already set, then no need to set again since it won't change
         // Other apps should always set environment again since termux app may be installed/updated/deleted in background
         if (termuxAppEnvironment != null && isTermuxApp)
             return;
+
+        // For other apps, reuse the cached environment if the Termux app version has not changed,
+        // so that only a single light PackageManager lookup is done instead of the full set of
+        // PackageManager, signing certificate and ActivityManager IPCs on every call
+        if (!isTermuxApp) {
+            CachedTermuxAppEnvironment cachedEnvironment = sTermuxAppEnvironmentCache.get(callerPackageName);
+            if (cachedEnvironment != null) {
+                PackageInfo packageInfo = PackageUtils.getPackageInfoForPackage(currentPackageContext,
+                    TermuxConstants.TERMUX_PACKAGE_NAME);
+                if (packageInfo != null &&
+                    Objects.equals(PackageUtils.getVersionCodeForPackage(packageInfo), cachedEnvironment.versionCode) &&
+                    Objects.equals(PackageUtils.getVersionNameForPackage(packageInfo), cachedEnvironment.versionName)) {
+                    termuxAppEnvironment = cachedEnvironment.environment;
+                    return;
+                }
+            }
+        }
 
         termuxAppEnvironment = null;
 
@@ -158,6 +201,14 @@ public class TermuxAppShellEnvironment {
         }
 
         termuxAppEnvironment = environment;
+
+        // Cache the environment for non-Termux caller packages, invalidated on Termux app version change
+        if (!isTermuxApp) {
+            sTermuxAppEnvironmentCache.put(callerPackageName, new CachedTermuxAppEnvironment(
+                PackageUtils.getVersionCodeForPackage(packageInfo),
+                PackageUtils.getVersionNameForPackage(packageInfo),
+                environment));
+        }
     }
 
     /** Put {@link #ENV_TERMUX_APP__APK_RELEASE} in {@code environment}. */

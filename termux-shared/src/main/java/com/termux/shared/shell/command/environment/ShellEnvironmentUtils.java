@@ -14,10 +14,15 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public class ShellEnvironmentUtils {
 
     private static final String LOG_TAG = "ShellEnvironmentUtils";
+
+    /** Precompiled pattern for {@link #isValidEnvironmentVariableName(String)} to avoid
+     * recompiling the regex on every call. */
+    private static final Pattern ENV_VAR_NAME_PATTERN = Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*");
 
     /**
      * Convert environment {@link HashMap} to `environ` {@link List <String>}.
@@ -126,7 +131,7 @@ public class ShellEnvironmentUtils {
      * start with a digit.
      */
     public static boolean isValidEnvironmentVariableName(@Nullable String name) {
-        return name != null && !name.contains("\0") && name.matches("[a-zA-Z_][a-zA-Z0-9_]*");
+        return name != null && !name.contains("\0") && ENV_VAR_NAME_PATTERN.matcher(name).matches();
     }
 
     /**

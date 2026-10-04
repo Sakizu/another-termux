@@ -2,6 +2,7 @@
 #include <ctime>
 #include <cerrno>
 #include <jni.h>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <unistd.h>
@@ -22,13 +23,92 @@ using namespace std;
 /* Forward declarations. */
 bool checkJniException(JNIEnv *env);
 
+/* Cached JNI class and method references.
+ *
+ * FindClass() and GetMethodID() are expensive and used to run on every JNI
+ * call. They are now resolved once on first use and cached in the globals
+ * below. The classes are held as global refs so they stay valid across calls.
+ *
+ * The cache is initialized lazily from a Java thread instead of in
+ * JNI_OnLoad() because FindClass() called from JNI_OnLoad() can only see the
+ * system class loader and would fail to find app classes like JniResult.
+ */
+static mutex g_jniCacheMutex;
+static bool g_jniCacheInitialized = false;
+static jclass g_jniResultClass = nullptr;        /* global ref */
+static jmethodID g_jniResultConstructor = nullptr;
+static jclass g_stringClass = nullptr;           /* global ref */
+static jmethodID g_stringGetBytesMethod = nullptr;
+static jclass g_classClass = nullptr;            /* global ref */
+static jmethodID g_classGetNameMethod = nullptr;
+
+/* Resolve the cached JNI class and method references on first use.
+ * Must be called with a JNIEnv of a Java thread. Returns true on success. */
+static bool initJniCache(JNIEnv *env) {
+    lock_guard<mutex> lock(g_jniCacheMutex);
+    if (g_jniCacheInitialized) return true;
+
+    /* Resolve everything into local refs first and only publish global refs
+     * on full success, so a failed attempt does not leak partial results. */
+    jclass jniResultClass = env->FindClass("com/termux/shared/jni/models/JniResult");
+    if (checkJniException(env) || jniResultClass == nullptr) return false;
+    jmethodID jniResultConstructor = env->GetMethodID(jniResultClass, "<init>", "(IILjava/lang/String;I)V");
+    if (checkJniException(env) || jniResultConstructor == nullptr) {
+        env->DeleteLocalRef(jniResultClass);
+        return false;
+    }
+
+    jclass stringClass = env->FindClass("java/lang/String");
+    if (checkJniException(env) || stringClass == nullptr) {
+        env->DeleteLocalRef(jniResultClass);
+        return false;
+    }
+    jmethodID stringGetBytesMethod = env->GetMethodID(stringClass, "getBytes", "()[B");
+    if (checkJniException(env) || stringGetBytesMethod == nullptr) {
+        env->DeleteLocalRef(jniResultClass);
+        env->DeleteLocalRef(stringClass);
+        return false;
+    }
+
+    jclass classClass = env->FindClass("java/lang/Class");
+    if (checkJniException(env) || classClass == nullptr) {
+        env->DeleteLocalRef(jniResultClass);
+        env->DeleteLocalRef(stringClass);
+        return false;
+    }
+    jmethodID classGetNameMethod = env->GetMethodID(classClass, "getName", "()Ljava/lang/String;");
+    if (checkJniException(env) || classGetNameMethod == nullptr) {
+        env->DeleteLocalRef(jniResultClass);
+        env->DeleteLocalRef(stringClass);
+        env->DeleteLocalRef(classClass);
+        return false;
+    }
+
+    g_jniResultClass = (jclass) env->NewGlobalRef(jniResultClass);
+    g_stringClass = (jclass) env->NewGlobalRef(stringClass);
+    g_classClass = (jclass) env->NewGlobalRef(classClass);
+    env->DeleteLocalRef(jniResultClass);
+    env->DeleteLocalRef(stringClass);
+    env->DeleteLocalRef(classClass);
+    if (checkJniException(env) ||
+        g_jniResultClass == nullptr || g_stringClass == nullptr || g_classClass == nullptr) {
+        g_jniResultClass = nullptr;
+        g_stringClass = nullptr;
+        g_classClass = nullptr;
+        return false;
+    }
+
+    g_jniResultConstructor = jniResultConstructor;
+    g_stringGetBytesMethod = stringGetBytesMethod;
+    g_classGetNameMethod = classGetNameMethod;
+    g_jniCacheInitialized = true;
+    return true;
+}
+
 /* Convert a jstring to a std:string. */
 string jstring_to_stdstr(JNIEnv *env, jstring jString) {
-    jclass stringClass = env->FindClass("java/lang/String");
-    if (checkJniException(env) || stringClass == nullptr) return "";
-    jmethodID getBytes = env->GetMethodID(stringClass, "getBytes", "()[B");
-    if (checkJniException(env) || getBytes == nullptr) return "";
-    jbyteArray jStringBytesArray = (jbyteArray) env->CallObjectMethod(jString, getBytes);
+    if (!initJniCache(env)) return "";
+    jbyteArray jStringBytesArray = (jbyteArray) env->CallObjectMethod(jString, g_stringGetBytesMethod);
     if (checkJniException(env) || jStringBytesArray == nullptr) return "";
     jsize length = env->GetArrayLength(jStringBytesArray);
     jbyte* jStringBytes = env->GetByteArrayElements(jStringBytesArray, nullptr);
@@ -70,11 +150,8 @@ string replace_null_with_space(string str) {
 
 /* Get class name of a jclazz object with a call to `Class.getName()`. */
 string get_class_name(JNIEnv *env, jclass clazz) {
-    jclass classClass = env->FindClass("java/lang/Class");
-    if (checkJniException(env) || classClass == nullptr) return "";
-    jmethodID getName = env->GetMethodID(classClass, "getName", "()Ljava/lang/String;");
-    if (checkJniException(env) || getName == nullptr) return "";
-    jstring className = (jstring) env->CallObjectMethod(clazz, getName);
+    if (!initJniCache(env)) return "";
+    jstring className = (jstring) env->CallObjectMethod(clazz, g_classGetNameMethod);
     if (checkJniException(env) || className == nullptr) return "";
     return jstring_to_stdstr(env, className);
 }
@@ -172,20 +249,9 @@ string getJniResultString(const int retvalParam, const int errnoParam,
 /* Get "com/termux/shared/jni/models/JniResult" object that can be returned as result for a JNI call. */
 jobject getJniResult(JNIEnv *env, jstring title, const int retvalParam, const int errnoParam,
                      string errmsgParam, const int intDataParam) {
-    jclass clazz = env->FindClass("com/termux/shared/jni/models/JniResult");
-    if (checkJniException(env)) return NULL;
-    if (!clazz) {
+    if (!initJniCache(env)) {
         log_error(get_title_and_message(env, title,
-                                        "Failed to find JniResult class to create object for " +
-                                        getJniResultString(retvalParam, errnoParam, errmsgParam, intDataParam)));
-        return NULL;
-    }
-
-    jmethodID constructor = env->GetMethodID(clazz, "<init>", "(IILjava/lang/String;I)V");
-    if (checkJniException(env)) return NULL;
-    if (!constructor) {
-        log_error(get_title_and_message(env, title,
-                                        "Failed to get constructor for JniResult class to create object for " +
+                                        "Failed to resolve cached JniResult class to create object for " +
                                         getJniResultString(retvalParam, errnoParam, errmsgParam, intDataParam)));
         return NULL;
     }
@@ -193,7 +259,7 @@ jobject getJniResult(JNIEnv *env, jstring title, const int retvalParam, const in
     if (!errmsgParam.empty())
         errmsgParam = get_title_and_message(env, title, string(errmsgParam));
 
-    jobject obj = env->NewObject(clazz, constructor, retvalParam, errnoParam, env->NewStringUTF(errmsgParam.c_str()), intDataParam);
+    jobject obj = env->NewObject(g_jniResultClass, g_jniResultConstructor, retvalParam, errnoParam, env->NewStringUTF(errmsgParam.c_str()), intDataParam);
     if (checkJniException(env)) return NULL;
     if (obj == NULL) {
         log_error(get_title_and_message(env, title,
@@ -614,4 +680,27 @@ Java_com_termux_shared_net_socket_local_LocalSocketManager_getPeerCredNative(JNI
 
     // Return success since PeerCred was filled successfully
     return getJniResult(env, logTitle);
+}
+
+/* Release the cached global refs when the library is unloaded. */
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
+    lock_guard<mutex> lock(g_jniCacheMutex);
+    JNIEnv *env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) return;
+    if (g_jniResultClass != nullptr) {
+        env->DeleteGlobalRef(g_jniResultClass);
+        g_jniResultClass = nullptr;
+    }
+    if (g_stringClass != nullptr) {
+        env->DeleteGlobalRef(g_stringClass);
+        g_stringClass = nullptr;
+    }
+    if (g_classClass != nullptr) {
+        env->DeleteGlobalRef(g_classClass);
+        g_classClass = nullptr;
+    }
+    g_jniResultConstructor = nullptr;
+    g_stringGetBytesMethod = nullptr;
+    g_classGetNameMethod = nullptr;
+    g_jniCacheInitialized = false;
 }

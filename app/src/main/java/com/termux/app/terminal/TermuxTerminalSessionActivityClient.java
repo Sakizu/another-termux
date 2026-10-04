@@ -11,6 +11,7 @@ import android.graphics.Typeface;
 import android.media.AudioAttributes;
 import android.media.SoundPool;
 import android.text.TextUtils;
+import android.view.Gravity;
 import androidx.recyclerview.widget.RecyclerView;
 
 import androidx.annotation.NonNull;
@@ -50,6 +51,15 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
      *  when the session exits (a SIGKILLed shell exits with -9, which the stock
      *  auto-remove does not cover). All access is on the main thread. */
     private final Set<TerminalSession> mKillRequestedSessions = new HashSet<>();
+
+    /** Adapter position of the drawer row currently highlighted as the current
+     *  session, or -1 if none. Used to refresh only the highlight rows instead
+     *  of the whole list. All access is on the main thread. */
+    private int mHighlightedSessionPosition = -1;
+
+    /** Cached drawer RecyclerView; the drawer view hierarchy is stable for the
+     *  activity lifetime, so findViewById is only needed once. */
+    private RecyclerView mSessionsRecyclerView;
 
     private SoundPool mBellSoundPool;
 
@@ -171,8 +181,10 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
                 Logger.logVerbose(LOG_TAG, "The \"" + finishedSession.mSessionName + "\" session will be force finished automatically since result in pending.");
         }
 
-        if (mActivity.isVisible() && finishedSession != mActivity.getCurrentSession()) {
-            // Show toast for non-current sessions that exit.
+        if (mActivity.isVisible() && finishedSession != mActivity.getCurrentSession() && !killRequested) {
+            // Show toast for non-current sessions that exit. Skip it for a
+            // drawer-requested kill: the user asked for it and the row is
+            // removed, so there is nothing to announce.
             // Verify that session was not removed before we got told about it finishing:
             if (index >= 0)
                 mActivity.showToast(toToastTitle(finishedSession) + " - exited", true);
@@ -359,7 +371,8 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
 
         TextInputDialogUtils.textInput(mActivity, R.string.title_rename_session, sessionToRename.mSessionName, R.string.action_rename_session_confirm, text -> {
             renameSession(sessionToRename, text);
-            termuxSessionListNotifyUpdated();
+            // Targeted refresh: only this session's row changed.
+            notifySessionChanged(sessionToRename);
         }, -1, null, -1, null, null);
     }
 
@@ -495,8 +508,12 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
             removeFinishedSession(session);
             return;
         }
-        mKillRequestedSessions.add(session);
         session.finishIfRunning();
+        // Only track the kill if the session is still alive afterwards. A failed
+        // kill (or a session that exited in the meantime) must not leave a stale
+        // entry that would auto-remove the row on a later natural exit.
+        if (session.isRunning())
+            mKillRequestedSessions.add(session);
     }
 
     public void checkAndScrollToSession(TerminalSession session) {
@@ -506,15 +523,28 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
 
         final int indexOfSession = service.getIndexOfSession(session);
         if (indexOfSession < 0) return;
-        final RecyclerView termuxSessionsRecyclerView = mActivity.findViewById(R.id.terminal_sessions_list);
+        if (mSessionsRecyclerView == null)
+            mSessionsRecyclerView = mActivity.findViewById(R.id.terminal_sessions_list);
+        final RecyclerView termuxSessionsRecyclerView = mSessionsRecyclerView;
         if (termuxSessionsRecyclerView == null) return;
 
-        // The adapter highlights the current session in onBindViewHolder, so refresh it
-        // to reflect the new current session (replaces ListView.setItemChecked).
+        // The adapter highlights the current session in onBindViewHolder, so refresh
+        // only the previously and newly highlighted rows instead of the whole list
+        // (replaces ListView.setItemChecked).
+        final int oldPosition = mHighlightedSessionPosition;
+        mHighlightedSessionPosition = indexOfSession;
         RecyclerView.Adapter<?> adapter = termuxSessionsRecyclerView.getAdapter();
-        if (adapter != null) adapter.notifyDataSetChanged();
-        // Delay is necessary otherwise sometimes scroll to newly added session does not happen
-        termuxSessionsRecyclerView.postDelayed(() -> termuxSessionsRecyclerView.smoothScrollToPosition(indexOfSession), 1000);
+        if (adapter != null) {
+            int itemCount = adapter.getItemCount();
+            if (oldPosition >= 0 && oldPosition < itemCount && oldPosition != indexOfSession)
+                adapter.notifyItemChanged(oldPosition);
+            if (indexOfSession < itemCount)
+                adapter.notifyItemChanged(indexOfSession);
+        }
+        // Delay is necessary otherwise sometimes scroll to newly added session does not happen.
+        // Only scroll when the drawer is actually open; the list is hidden otherwise.
+        if (mActivity.getDrawer().isDrawerOpen(Gravity.LEFT))
+            termuxSessionsRecyclerView.postDelayed(() -> termuxSessionsRecyclerView.smoothScrollToPosition(indexOfSession), 1000);
     }
 
 
@@ -544,29 +574,36 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
 
 
     public void checkForFontAndColors() {
-        try {
-            File colorsFile = TermuxConstants.TERMUX_COLOR_PROPERTIES_FILE;
-            File fontFile = TermuxConstants.TERMUX_FONT_FILE;
+        // File reads and Typeface.createFromFile() (a 50-200ms font parse) must
+        // not block the UI thread; the results are applied back on it below.
+        new Thread(() -> {
+            try {
+                File colorsFile = TermuxConstants.TERMUX_COLOR_PROPERTIES_FILE;
+                File fontFile = TermuxConstants.TERMUX_FONT_FILE;
 
-            final Properties props = new Properties();
-            if (colorsFile.isFile()) {
-                try (InputStream in = new FileInputStream(colorsFile)) {
-                    props.load(in);
+                final Properties props = new Properties();
+                if (colorsFile.isFile()) {
+                    try (InputStream in = new FileInputStream(colorsFile)) {
+                        props.load(in);
+                    }
                 }
-            }
 
-            TerminalColors.COLOR_SCHEME.updateWith(props);
-            TerminalSession session = mActivity.getCurrentSession();
-            if (session != null && session.getEmulator() != null) {
-                session.getEmulator().mColors.reset();
-            }
-            updateBackgroundColor();
+                final Typeface newTypeface = (fontFile.exists() && fontFile.length() > 0) ? Typeface.createFromFile(fontFile) : Typeface.MONOSPACE;
 
-            final Typeface newTypeface = (fontFile.exists() && fontFile.length() > 0) ? Typeface.createFromFile(fontFile) : Typeface.MONOSPACE;
-            mActivity.getTerminalView().setTypeface(newTypeface);
-        } catch (Exception e) {
-            Logger.logStackTraceWithMessage(LOG_TAG, "Error in checkForFontAndColors()", e);
-        }
+                mActivity.runOnUiThread(() -> {
+                    if (mActivity.isFinishing() || mActivity.isDestroyed()) return;
+                    TerminalColors.COLOR_SCHEME.updateWith(props);
+                    TerminalSession session = mActivity.getCurrentSession();
+                    if (session != null && session.getEmulator() != null) {
+                        session.getEmulator().mColors.reset();
+                    }
+                    updateBackgroundColor();
+                    mActivity.getTerminalView().setTypeface(newTypeface);
+                });
+            } catch (Exception e) {
+                Logger.logStackTraceWithMessage(LOG_TAG, "Error in checkForFontAndColors()", e);
+            }
+        }).start();
     }
 
     public void updateBackgroundColor() {

@@ -122,8 +122,11 @@ public final class AppShell {
         // No need to log stdin if logging is disabled, like for app internal scripts
         Logger.logDebugExtended(LOG_TAG, ExecutionCommand.getExecutionInputLogString(executionCommand,
             true, Logger.shouldEnableLoggingForCustomLogLevel(executionCommand.backgroundCustomLogLevel)));
-        Logger.logVerboseExtended(LOG_TAG, "\"" + executionCommand.getCommandIdAndLabelLogString() + "\" AppShell Environment:\n" +
-            Joiner.on("\n").join(environmentArray));
+        // Only build the environment dump string if verbose logging is enabled, since
+        // joining the whole environment array is wasteful when the log will be dropped
+        if (Logger.shouldEnableLoggingForCustomLogLevel(executionCommand.backgroundCustomLogLevel))
+            Logger.logVerboseExtended(LOG_TAG, "\"" + executionCommand.getCommandIdAndLabelLogString() + "\" AppShell Environment:\n" +
+                Joiner.on("\n").join(environmentArray));
 
         // Exec the process
         final Process process;

@@ -5,12 +5,12 @@ import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
-import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MotionEvent;
 import android.view.View;
@@ -52,6 +52,16 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
     final StyleSpan italicSpan = new StyleSpan(Typeface.ITALIC);
 
     ItemTouchHelper mItemTouchHelper;
+
+    /** Cached ConstantStates for the session row backgrounds, re-resolved only
+     *  when the theme changes. The backgrounds are state_activated selectors,
+     *  so each row still gets its own Drawable instance via newDrawable() —
+     *  sharing a single instance across rows would route state changes and
+     *  invalidation to the wrong row. All access is on the main thread. */
+    private Drawable.ConstantState mRowBackgroundDarkState;
+    private Drawable.ConstantState mRowBackgroundLightState;
+    private boolean mRowBackgroundsCachedThemeDark;
+    private boolean mRowBackgroundsCached;
 
     private static final int MENU_RENAME_ID = 1;
     private static final int MENU_KILL_ID = 2;
@@ -154,12 +164,13 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
             return;
         }
 
-        showTitleLabel(holder, sessionAtRow);
+        // Resolve the theme once per bind and share it with showTitleLabel below.
+        boolean shouldEnableDarkTheme = ThemeUtils.shouldEnableDarkTheme(mActivity, NightMode.getAppNightMode().getName());
+
+        showTitleLabel(holder, sessionAtRow, shouldEnableDarkTheme);
 
         // Row background follows the theme, like the stock drawer did.
-        boolean shouldEnableDarkTheme = ThemeUtils.shouldEnableDarkTheme(mActivity, NightMode.getAppNightMode().getName());
-        holder.itemView.setBackground(ContextCompat.getDrawable(mActivity,
-            shouldEnableDarkTheme ? R.drawable.session_background_black_selected : R.drawable.session_background_selected));
+        holder.itemView.setBackground(getSessionRowBackground(shouldEnableDarkTheme));
 
         // Active row marker: white left border in dark theme, black in light theme.
         TerminalSession currentSession = mActivity.getCurrentSession();
@@ -193,7 +204,10 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
 
     /** Animate in the row for a newly added session. */
     public void notifySessionInserted(int position) {
-        if (position >= 0 && position <= getItemCount())
+        // The row was already added to the list, so the last valid position is
+        // getItemCount() - 1 (unlike notifySessionRemoved below, where the list
+        // was already decremented).
+        if (position >= 0 && position < getItemCount())
             notifyItemInserted(position);
         else
             notifyDataSetChanged();
@@ -215,12 +229,25 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         return mSessionList.get(position);
     }
 
+    /** Row background drawable for the given theme. Minting a per-row instance
+     *  from the cached ConstantState avoids XML re-inflation on every bind. */
+    private Drawable getSessionRowBackground(boolean darkTheme) {
+        if (!mRowBackgroundsCached || mRowBackgroundsCachedThemeDark != darkTheme) {
+            Drawable dark = ContextCompat.getDrawable(mActivity, R.drawable.session_background_black_selected);
+            Drawable light = ContextCompat.getDrawable(mActivity, R.drawable.session_background_selected);
+            mRowBackgroundDarkState = dark == null ? null : dark.getConstantState();
+            mRowBackgroundLightState = light == null ? null : light.getConstantState();
+            mRowBackgroundsCachedThemeDark = darkTheme;
+            mRowBackgroundsCached = true;
+        }
+        Drawable.ConstantState state = darkTheme ? mRowBackgroundDarkState : mRowBackgroundLightState;
+        return state == null ? null : state.newDrawable(mActivity.getResources());
+    }
+
     @SuppressLint("SetTextI18n")
-    private void showTitleLabel(@NonNull SessionViewHolder holder, @NonNull TerminalSession sessionAtRow) {
+    private void showTitleLabel(@NonNull SessionViewHolder holder, @NonNull TerminalSession sessionAtRow, boolean darkTheme) {
         holder.titleView.setVisibility(View.VISIBLE);
         TextView sessionTitleView = holder.titleView;
-
-        boolean shouldEnableDarkTheme = ThemeUtils.shouldEnableDarkTheme(mActivity, NightMode.getAppNightMode().getName());
 
         String name = sessionAtRow.mSessionName;
         String sessionTitle = sessionAtRow.getTitle();
@@ -249,7 +276,7 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         } else {
             sessionTitleView.setPaintFlags(sessionTitleView.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
         }
-        int defaultColor = shouldEnableDarkTheme ? Color.WHITE : Color.BLACK;
+        int defaultColor = darkTheme ? Color.WHITE : Color.BLACK;
         int color = sessionRunning || sessionAtRow.getExitStatus() == 0 ? defaultColor : Color.RED;
         sessionTitleView.setTextColor(color);
     }

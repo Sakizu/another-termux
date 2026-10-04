@@ -33,6 +33,20 @@ public final class TerminalRenderer {
 
     private final float[] asciiMeasures = new float[127];
 
+    /** First code point of the Box Drawing Unicode block (U+2500). */
+    private static final int BOX_DRAWING_START = 0x2500;
+    /** One past the last code point of the Box Drawing Unicode block (U+257F). */
+    private static final int BOX_DRAWING_END = 0x2580;
+
+    /**
+     * Cached glyph widths for U+2500-U+257F, like {@link #asciiMeasures}. Box-drawing
+     * characters make up nearly all non-ASCII output in htop/tmux/borders, and measuring
+     * them natively per frame costs thousands of JNI calls. The cache is filled once in
+     * the constructor, which is fine because the renderer is recreated whenever the
+     * typeface or text size changes (so the cached metrics can never go stale).
+     */
+    private final float[] boxDrawingMeasures = new float[BOX_DRAWING_END - BOX_DRAWING_START];
+
     public TerminalRenderer(int textSize, Typeface typeface) {
         mTextSize = textSize;
         mTypeface = typeface;
@@ -50,6 +64,10 @@ public final class TerminalRenderer {
         for (int i = 0; i < asciiMeasures.length; i++) {
             sb.setCharAt(0, (char) i);
             asciiMeasures[i] = mTextPaint.measureText(sb, 0, 1);
+        }
+        for (int i = BOX_DRAWING_START; i < BOX_DRAWING_END; i++) {
+            sb.setCharAt(0, (char) i);
+            boxDrawingMeasures[i - BOX_DRAWING_START] = mTextPaint.measureText(sb, 0, 1);
         }
     }
 
@@ -107,8 +125,9 @@ public final class TerminalRenderer {
                 // This could happen for some fonts which are not truly monospace, or for more exotic characters such as
                 // smileys which android font renders as wide.
                 // If this is detected, we draw this code point scaled to match what wcwidth() expects.
-                final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint] : mTextPaint.measureText(line,
-                    currentCharIndex, charsForCodePoint);
+                final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint]
+                    : (codePoint >= BOX_DRAWING_START && codePoint < BOX_DRAWING_END) ? boxDrawingMeasures[codePoint - BOX_DRAWING_START]
+                    : mTextPaint.measureText(line, currentCharIndex, charsForCodePoint);
                 final boolean fontWidthMismatch = Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
 
                 if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || fontWidthMismatch || lastRunFontWidthMismatch) {

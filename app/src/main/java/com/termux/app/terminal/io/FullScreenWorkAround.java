@@ -18,6 +18,7 @@ public class FullScreenWorkAround {
     private final View mChildOfContent;
     private int mUsableHeightPrevious;
     private final ViewGroup.LayoutParams mViewGroupLayoutParams;
+    private final Rect mRect = new Rect();
 
     private final int mNavBarHeight;
 
@@ -59,9 +60,8 @@ public class FullScreenWorkAround {
     }
 
     private int computeUsableHeight() {
-        Rect r = new Rect();
-        mChildOfContent.getWindowVisibleDisplayFrame(r);
-        return (r.bottom - r.top);
+        mChildOfContent.getWindowVisibleDisplayFrame(mRect);
+        return (mRect.bottom - mRect.top);
     }
 
 }

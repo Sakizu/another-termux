@@ -22,7 +22,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ImageButton;
-import android.widget.RelativeLayout;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import com.termux.R;
@@ -117,6 +117,18 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
      * Termux app SharedProperties loaded from termux.properties
      */
     private TermuxAppSharedProperties mProperties;
+
+    /**
+     * Cached controller used to show/hide the system bars for immersive mode.
+     * Created lazily so repeated calls do not re-allocate it.
+     */
+    private WindowInsetsControllerCompat mInsetsController;
+
+    /**
+     * The immersive-mode state last applied to the window, or null if never applied.
+     * Used to make {@link #setImmersiveMode()} a no-op when the setting is unchanged.
+     */
+    private Boolean mImmersiveModeApplied;
 
     /**
      * The root view of the {@link TermuxActivity}.
@@ -472,7 +484,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     }
 
     private void setMargins() {
-        RelativeLayout relativeLayout = findViewById(R.id.activity_termux_root_relative_layout);
+        LinearLayout relativeLayout = findViewById(R.id.activity_termux_root_relative_layout);
         int marginHorizontal = mProperties.getTerminalMarginHorizontal();
         int marginVertical = mProperties.getTerminalMarginVertical();
         ViewUtils.setLayoutMarginsInDp(relativeLayout, marginHorizontal, marginVertical, marginHorizontal, marginVertical);
@@ -493,8 +505,18 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     private void setImmersiveMode() {
         if (mPreferences == null) return;
         boolean enabled = mPreferences.isImmersiveModeEnabled();
-        WindowInsetsControllerCompat controller =
-            new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
+        if (mInsetsController == null) {
+            mInsetsController = new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
+        }
+        // Steady state: the setting has not changed since the last call. If immersive
+        // mode is on, re-hide the bars (the system may have restored them while the
+        // window lacked focus); nothing else needs doing.
+        if (mImmersiveModeApplied != null && mImmersiveModeApplied == enabled) {
+            if (enabled) {
+                mInsetsController.hide(WindowInsetsCompat.Type.systemBars());
+            }
+            return;
+        }
         // Render into the display cutout area (punch-hole camera) while immersive,
         // otherwise Android letterboxes the window and the status bar area stays
         // empty. Restored to default when the toggle is off.
@@ -512,13 +534,21 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         }
         if (!enabled) {
             WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-            controller.show(WindowInsetsCompat.Type.systemBars());
+            mInsetsController.show(WindowInsetsCompat.Type.systemBars());
+            // The legacy termux.properties fullscreen=true option relies on the window
+            // fullscreen flag, which the compat show() above may clear on API 24-29.
+            // Re-apply it so the option keeps working when immersive mode is disabled.
+            if (mProperties != null && mProperties.isUsingFullScreen()) {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            }
+            mImmersiveModeApplied = false;
             return;
         }
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        controller.setSystemBarsBehavior(
+        mInsetsController.setSystemBarsBehavior(
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-        controller.hide(WindowInsetsCompat.Type.systemBars());
+        mInsetsController.hide(WindowInsetsCompat.Type.systemBars());
+        mImmersiveModeApplied = true;
     }
 
     @Override
@@ -557,11 +587,16 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     }
 
     private void setTermuxSessionsListView() {
-        RecyclerView termuxSessionsRecyclerView = findViewById(R.id.terminal_sessions_list);
-        mTermuxSessionListViewController = new TermuxSessionsListViewController(this, mTermuxService.getTermuxSessions());
-        termuxSessionsRecyclerView.setLayoutManager(new LinearLayoutManager(this));
-        termuxSessionsRecyclerView.setAdapter(mTermuxSessionListViewController);
-        mTermuxSessionListViewController.attachToRecyclerView(termuxSessionsRecyclerView);
+        // The activity survives service-process restarts, so this may be called
+        // again while a controller already exists. Recreating it would stack
+        // duplicate drag-and-drop handlers on the RecyclerView.
+        if (mTermuxSessionListViewController == null) {
+            RecyclerView termuxSessionsRecyclerView = findViewById(R.id.terminal_sessions_list);
+            mTermuxSessionListViewController = new TermuxSessionsListViewController(this, mTermuxService.getTermuxSessions());
+            termuxSessionsRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+            termuxSessionsRecyclerView.setAdapter(mTermuxSessionListViewController);
+            mTermuxSessionListViewController.attachToRecyclerView(termuxSessionsRecyclerView);
+        }
     }
 
 

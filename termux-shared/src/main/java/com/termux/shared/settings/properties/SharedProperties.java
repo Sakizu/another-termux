@@ -1,7 +1,6 @@
 package com.termux.shared.settings.properties;
 
 import android.content.Context;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -209,10 +208,13 @@ public class SharedProperties {
     public Object getInternalProperty(String key) {
         synchronized (mLock) {
             // null keys are not allowed to be stored in mMap
-            if (key != null)
-                return getInternalProperties().get(key);
-            else
+            // Read directly from mMap under the same lock instead of copying the whole map
+            if (key != null) {
+                if (mMap == null) mMap = new HashMap<>();
+                return mMap.get(key);
+            } else {
                 return null;
+            }
         }
     }
 
@@ -244,8 +246,10 @@ public class SharedProperties {
                 properties.load(new InputStreamReader(in, StandardCharsets.UTF_8));
             }
         } catch (Exception e) {
+            // Post toast to main looper via Logger.showToast() since this may be called on a
+            // thread without a Looper, like a shell command thread
             if (context != null)
-                Toast.makeText(context, "Could not open properties file \"" + propertiesFile.getAbsolutePath() + "\": " + e.getMessage(), Toast.LENGTH_LONG).show();
+                Logger.showToast(context, "Could not open properties file \"" + propertiesFile.getAbsolutePath() + "\": " + e.getMessage(), true);
             Logger.logStackTraceWithMessage(LOG_TAG, "Error loading properties file \"" + propertiesFile.getAbsolutePath() + "\"", e);
             return null;
         }
