@@ -560,6 +560,7 @@ public final class TerminalEmulator {
     }
 
     public void setCursorBlinkingEnabled(boolean cursorBlinkingEnabled) {
+        if (this.mCursorBlinkingEnabled == cursorBlinkingEnabled) return;
         this.mCursorBlinkingEnabled = cursorBlinkingEnabled;
         // Toggling blinking changes cursor visibility (steady vs blinking) - repaint the cursor row.
         // The blink runnable itself repaints just the cursor cell when it toggles (see TerminalView).
@@ -853,6 +854,18 @@ public final class TerminalEmulator {
                                 int left = Math.min(getArg(1, 1, true) - 1, effectiveRightMargin) + effectiveLeftMargin;
                                 int bottom = Math.min(getArg(2, mRows, true) + 1, effectiveBottomMargin - 1) + effectiveTopMargin;
                                 int right = Math.min(getArg(3, mColumns, true) + 1, effectiveRightMargin - 1) + effectiveLeftMargin;
+                                // Clamp the rectangle to the visible screen. Crafted arguments (reachable from any
+                                // pty output) can otherwise push coordinates past the screen edge, making
+                                // setOrClearEffect() throw out of bounds and kill the app. Clamping only ever
+                                // shrinks the rectangle, never widens it.
+                                top = Math.max(0, Math.min(top, mRows));
+                                bottom = Math.max(0, Math.min(bottom, mRows));
+                                left = Math.max(0, Math.min(left, mColumns));
+                                right = Math.max(0, Math.min(right, mColumns));
+                                if (top >= bottom || left >= right) {
+                                    // Empty rectangle: nothing to change.
+                                    break;
+                                }
                                 if (mArgIndex >= 4) {
                                     if (mArgIndex >= mArgs.length) mArgIndex = mArgs.length - 1;
                                     for (int i = 4; i <= mArgIndex; i++) {

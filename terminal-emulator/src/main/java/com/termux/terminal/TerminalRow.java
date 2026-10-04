@@ -65,6 +65,10 @@ public final class TerminalRow {
         final int x2 = line.findStartOfColumn(sourceX2);
         boolean startingFromSecondHalfOfWideChar = (sourceX1 > 0 && line.wideDisplayCharacterStartingAt(sourceX1 - 1));
         final char[] sourceChars = (this == line) ? Arrays.copyOf(line.mText, line.mText.length) : line.mText;
+        // Styles are read through the source row while the loop overwrites mStyle via setChar(), so snapshot them
+        // for same-row copies too: a rightward shift would otherwise smear already-copied styles into the
+        // not-yet-copied part of the source range.
+        final long[] sourceStyles = (this == line) ? Arrays.copyOf(line.mStyle, line.mStyle.length) : line.mStyle;
         int latestNonCombiningWidth = 0;
         for (int i = x1; i < x2; i++) {
             char sourceChar = sourceChars[i];
@@ -80,7 +84,7 @@ public final class TerminalRow {
                 sourceX1 += latestNonCombiningWidth;
                 latestNonCombiningWidth = w;
             }
-            setChar(destinationX, codePoint, line.getStyle(sourceX1));
+            setChar(destinationX, codePoint, sourceStyles[sourceX1]);
         }
     }
 

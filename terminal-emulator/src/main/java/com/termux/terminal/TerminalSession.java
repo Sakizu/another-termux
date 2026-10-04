@@ -50,6 +50,16 @@ public final class TerminalSession extends TerminalOutput {
     /** Buffer to write translate code points into utf8 before writing to mTerminalToProcessIOQueue */
     private final byte[] mUtf8InputBuffer = new byte[5];
 
+    /**
+     * How long {@link #cleanupResources(int)} waits for the input reader thread to exit.
+     * The reader is normally already gone by then (the pty master reports EIO once the
+     * last slave closes), but a surviving child holding the pty slave open — e.g. a
+     * daemonized grandchild — can keep it blocked in read() forever, since close() does
+     * not interrupt a thread already inside read(). The wait must stay well under the
+     * ANR threshold because cleanup runs on the main thread.
+     */
+    private static final long INPUT_READER_JOIN_TIMEOUT_MS = 2000;
+
     /** Callback which gets notified when a session finishes or changes title. */
     TerminalSessionClient mClient;
 
@@ -64,6 +74,12 @@ public final class TerminalSession extends TerminalOutput {
      * {@link JNI#createSubprocess(String, String, String[], String[], int[], int, int, int, int)}.
      */
     private int mTerminalFileDescriptor;
+
+    /**
+     * The thread copying process output from the pty into {@link #mProcessToTerminalIOQueue}.
+     * Kept so process-exit teardown can wait for it before draining the last bytes.
+     */
+    private Thread mInputReaderThread;
 
     /** Set by the application for user identification of session, not by terminal. */
     public String mSessionName;
@@ -130,7 +146,7 @@ public final class TerminalSession extends TerminalOutput {
 
         final FileDescriptor terminalFileDescriptorWrapped = wrapFileDescriptor(mTerminalFileDescriptor, mClient);
 
-        new Thread("TermSessionInputReader[pid=" + mShellPid + "]") {
+        mInputReaderThread = new Thread("TermSessionInputReader[pid=" + mShellPid + "]") {
             @Override
             public void run() {
                 try (InputStream termIn = new FileInputStream(terminalFileDescriptorWrapped)) {
@@ -150,7 +166,8 @@ public final class TerminalSession extends TerminalOutput {
                     // Ignore, just shutting down.
                 }
             }
-        }.start();
+        };
+        mInputReaderThread.start();
 
         new Thread("TermSessionOutputWriter[pid=" + mShellPid + "]") {
             @Override
@@ -257,10 +274,51 @@ public final class TerminalSession extends TerminalOutput {
             mShellExitStatus = exitStatus;
         }
 
-        // Stop the reader and writer threads, and close the I/O streams
+        // Stop the writer thread: its blocked queue read returns once the queue is closed.
         mTerminalToProcessIOQueue.close();
-        mProcessToTerminalIOQueue.close();
+
+        // Close the pty master so the input reader cannot read any more data. Bytes it
+        // already wrote stay in mProcessToTerminalIOQueue.
         JNI.close(mTerminalFileDescriptor);
+
+        // Drain once before joining: ByteQueue.write() blocks when the queue is full, and
+        // the main thread is the only consumer, so join()ing first could wait forever on
+        // a reader stuck writing its last chunk. This drain unblocks it.
+        drainProcessOutputQueue();
+
+        // Wait for the reader to finish so no output can arrive after the final drain.
+        // This always runs on the main thread (called from MainThreadHandler), never on
+        // the reader thread itself, but check anyway to rule out a self-join deadlock.
+        // The wait is bounded: if a surviving child (e.g. a daemonized grandchild) keeps
+        // the pty slave open, the reader can stay blocked in read() forever — close()
+        // does not interrupt a thread already inside read() — and an unbounded join()
+        // would ANR the main thread. After the timeout the final drain still runs; a
+        // stray reader that wakes up later finds the queue closed and exits on its own.
+        Thread inputReaderThread = mInputReaderThread;
+        if (inputReaderThread != null && Thread.currentThread() != inputReaderThread) {
+            try {
+                inputReaderThread.join(INPUT_READER_JOIN_TIMEOUT_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        // Final drain with the reader gone: everything the process wrote before exiting
+        // is in the queue, so no trailing output is dropped. Only then close the queue.
+        drainProcessOutputQueue();
+        mProcessToTerminalIOQueue.close();
+    }
+
+    /**
+     * Append any bytes still waiting in the process-to-terminal queue to the emulator.
+     * Only the main thread consumes this queue, so this is safe to call repeatedly.
+     */
+    private void drainProcessOutputQueue() {
+        final byte[] buffer = new byte[4096];
+        int bytesRead;
+        while ((bytesRead = mProcessToTerminalIOQueue.read(buffer, false)) > 0) {
+            mEmulator.append(buffer, bytesRead);
+        }
     }
 
     @Override

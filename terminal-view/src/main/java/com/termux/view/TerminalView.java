@@ -133,6 +133,17 @@ public final class TerminalView extends View {
     /** Uptime millis when the content description was last refreshed (throttled). */
     private long mLastContentDescriptionUpdateTime;
 
+    /**
+     * Coalesced delayed re-check posted when a content-description refresh is skipped by the
+     * throttle, so the final state of a burst is always announced once the interval elapses.
+     */
+    private final Runnable mContentDescriptionRecheckRunnable = new Runnable() {
+        @Override
+        public void run() {
+            updateContentDescriptionThrottled();
+        }
+    };
+
     /** The {@link KeyEvent} is generated from a virtual keyboard, like manually with the {@link KeyEvent#KeyEvent(int, int)} constructor. */
     public final static int KEY_EVENT_SOURCE_VIRTUAL_KEYBOARD = KeyCharacterMap.VIRTUAL_KEYBOARD; // -1
 
@@ -487,11 +498,11 @@ public final class TerminalView extends View {
     }
 
     public void onScreenUpdated() {
-        onScreenUpdated(false);
-    }
-
-    public void onScreenUpdated(boolean skipScrolling) {
         if (mEmulator == null) return;
+
+        // Local flag: the removed boolean overload had no caller that ever passed true
+        // (the single in-repo caller used the no-arg form), so start from false.
+        boolean skipScrolling = false;
 
         int rowsInHistory = mEmulator.getScreen().getActiveTranscriptRows();
         int topRowBeforeUpdate = mTopRow;
@@ -576,10 +587,20 @@ public final class TerminalView extends View {
      * {@link #CONTENT_DESCRIPTION_UPDATE_INTERVAL_MS} ms, and only when the text actually
      * changed. Building the full-screen string and dispatching the accessibility event on
      * every screen update is expensive during heavy output.
+     * <p>
+     * When a refresh is skipped by the throttle, a single coalesced re-check is posted for
+     * when the interval elapses, so the final state of a burst is never silently dropped.
      */
     private void updateContentDescriptionThrottled() {
         long now = SystemClock.uptimeMillis();
-        if (now - mLastContentDescriptionUpdateTime < CONTENT_DESCRIPTION_UPDATE_INTERVAL_MS) return;
+        long elapsed = now - mLastContentDescriptionUpdateTime;
+        if (elapsed < CONTENT_DESCRIPTION_UPDATE_INTERVAL_MS) {
+            // A later state in this burst may be the final one: post one coalesced re-check
+            // (removing any pending one first) for when the interval elapses.
+            removeCallbacks(mContentDescriptionRecheckRunnable);
+            postDelayed(mContentDescriptionRecheckRunnable, CONTENT_DESCRIPTION_UPDATE_INTERVAL_MS - elapsed);
+            return;
+        }
         mLastContentDescriptionUpdateTime = now;
         String text = getText().toString();
         if (!text.equals(mLastContentDescription)) {
@@ -604,6 +625,10 @@ public final class TerminalView extends View {
     public void setTextSize(int textSize) {
         mRenderer = new TerminalRenderer(textSize, mRenderer == null ? Typeface.MONOSPACE : mRenderer.mTypeface);
         updateSize();
+        // updateSize() only invalidates when the row/column count changes (it clamps to a
+        // minimum of 4x4), so repaint here too: a font-size change that leaves the grid
+        // unchanged would otherwise never redraw with the new metrics.
+        invalidate();
     }
 
     public void setTypeface(Typeface newTypeface) {
@@ -939,14 +964,16 @@ public final class TerminalView extends View {
 
         if (mTermSession == null) return;
 
-        // Ensure cursor is shown when a key is pressed down like long hold on (arrow) keys
-        if (mEmulator != null)
-            mEmulator.setCursorBlinkState(true);
-
         final boolean controlDown = controlDownFromEvent || mClient.readControlKey();
         final boolean altDown = leftAltDownFromEvent || mClient.readAltKey();
 
         if (mClient.onCodePoint(codePoint, controlDown, mTermSession)) return;
+
+        // Ensure the cursor is shown when a key reaches the terminal, like on long hold
+        // of (arrow) keys. Do this only after the client had its chance to consume the key,
+        // so a client-consumed key does not needlessly reset the blink state.
+        if (mEmulator != null)
+            mEmulator.setCursorBlinkState(true);
 
         if (controlDown) {
             if (codePoint >= 'a' && codePoint <= 'z') {
@@ -1124,7 +1151,9 @@ public final class TerminalView extends View {
     }
 
     public int getCursorY(float y) {
-        return (int) (((y - 40) / mRenderer.mFontLineSpacing) + mTopRow);
+        // Match getColumnAndRow(): visible row i starts at mFontLineSpacingAndAscent
+        // + i * mFontLineSpacing, offset by the scroll position.
+        return (int) (((y - mRenderer.mFontLineSpacingAndAscent) / mRenderer.mFontLineSpacing) + mTopRow);
     }
 
     public int getPointX(int cx) {
@@ -1135,7 +1164,9 @@ public final class TerminalView extends View {
     }
 
     public int getPointY(int cy) {
-        return Math.round((cy - mTopRow) * mRenderer.mFontLineSpacing);
+        // Inverse of getCursorY()/getColumnAndRow(relativeToScroll = true): the top edge of
+        // the visible row band for terminal row cy.
+        return Math.round(mRenderer.mFontLineSpacingAndAscent + (cy - mTopRow) * mRenderer.mFontLineSpacing);
     }
 
     public int getTopRow() {
@@ -1444,12 +1475,18 @@ public final class TerminalView extends View {
         int visibleRow = emulator.getCursorRow() - mTopRow;
         if (visibleRow < 0 || visibleRow >= emulator.mRows) return; // Cursor is scrolled off screen.
         float fontWidth = renderer.getFontWidth();
+        int fontLineSpacing = renderer.getFontLineSpacing();
         // Mirror TerminalRenderer.render(): the row at visible index i is drawn with its
         // baseline at mFontLineSpacingAndAscent + (i + 1) * mFontLineSpacing.
-        float y = renderer.mFontLineSpacingAndAscent + (visibleRow + 1) * renderer.getFontLineSpacing();
+        float y = renderer.mFontLineSpacingAndAscent + (visibleRow + 1) * fontLineSpacing;
         int cursorCol = emulator.getCursorCol();
+        // The block cursor fills the whole [y - mFontLineSpacing, y] band: TerminalRenderer
+        // draws it with cursorHeight = mFontLineSpacingAndAscent - mFontAscent, which equals
+        // mFontLineSpacing since mFontLineSpacingAndAscent is their sum. Using only
+        // mFontLineSpacingAndAscent for the rect top would leave the top sliver
+        // (-mFontAscent pixels) unrepainted on blink-off, ghosting the cursor.
         invalidate((int) ((cursorCol - 1) * fontWidth),
-            (int) (y - renderer.mFontLineSpacingAndAscent),
+            (int) (y - fontLineSpacing),
             (int) Math.ceil((cursorCol + 2) * fontWidth),
             (int) Math.ceil(y));
     }
