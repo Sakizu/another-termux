@@ -552,7 +552,11 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             }
             // Full immersive mode enables transient-bars-by-swipe below; reset it
             // here so leaving mode 2 restores the stock behavior as well.
-            mInsetsController.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_DEFAULT);
+            // BEHAVIOR_SHOW_BARS_BY_SWIPE is the platform default behavior
+            // (androidx core 1.7.0+ renamed it BEHAVIOR_DEFAULT with the same
+            // value 1; the pinned core 1.6.0 only has this name).
+            mInsetsController.setSystemBarsBehavior(
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_BARS_BY_SWIPE);
             WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
             WindowManager.LayoutParams attrs = getWindow().getAttributes();
             attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
@@ -595,8 +599,10 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             getWindow().setAttributes(hideBarsAttrs);
             // Full immersive mode enables transient-bars-by-swipe; this mode is
             // not edge-to-edge, so restore the default behavior instead of
-            // leaking the transient one across a 2->1 switch.
-            mInsetsController.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_DEFAULT);
+            // leaking the transient one across a 2->1 switch. (Same constant
+            // note as above: BEHAVIOR_SHOW_BARS_BY_SWIPE == BEHAVIOR_DEFAULT.)
+            mInsetsController.setSystemBarsBehavior(
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_BARS_BY_SWIPE);
             mInsetsController.hide(WindowInsetsCompat.Type.systemBars());
         }
         mImmersiveModeApplied = mode;
