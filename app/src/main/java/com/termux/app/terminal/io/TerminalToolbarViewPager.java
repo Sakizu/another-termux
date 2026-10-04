@@ -50,10 +50,11 @@ public class TerminalToolbarViewPager {
                 extraKeysView.reload(mActivity.getTermuxTerminalExtraKeys().getExtraKeysInfo(),
                     mActivity.getTerminalToolbarDefaultHeight());
 
-                // apply extra keys fix if enabled in prefs
-                if (mActivity.getProperties().isUsingFullScreen() && mActivity.getProperties().isUsingFullScreenWorkAround()) {
-                    FullScreenWorkAround.apply(mActivity);
-                }
+                // apply the extra keys resize fix when needed (legacy fullscreen
+                // with the work around enabled, or immersive mode). This also
+                // covers the case where setImmersiveMode() ran before the
+                // content view was ready.
+                FullScreenWorkAround.applyIfNeeded(mActivity);
 
             } else {
                 layout = inflater.inflate(R.layout.view_terminal_toolbar_text_input, collection, false);

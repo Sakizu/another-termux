@@ -29,6 +29,7 @@ import com.termux.R;
 import com.termux.app.api.file.FileReceiverActivity;
 import com.termux.app.terminal.TermuxActivityRootView;
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient;
+import com.termux.app.terminal.io.FullScreenWorkAround;
 import com.termux.app.terminal.io.TermuxTerminalExtraKeys;
 import com.termux.shared.activities.ReportActivity;
 import com.termux.shared.activity.ActivityUtils;
@@ -129,6 +130,12 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
      * Used to make {@link #setImmersiveMode()} a no-op when the setting is unchanged.
      */
     private Boolean mImmersiveModeApplied;
+
+    /**
+     * The active {@link FullScreenWorkAround} instance, or null if the work around
+     * is not currently needed. Managed through {@link FullScreenWorkAround#applyIfNeeded}.
+     */
+    private FullScreenWorkAround mFullScreenWorkAround;
 
     /**
      * The root view of the {@link TermuxActivity}.
@@ -517,6 +524,11 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             }
             return;
         }
+        // The extra keys resize fix must be re-evaluated whenever the immersive
+        // state actually changes: enabling it needs the fix (edge-to-edge
+        // disables the framework adjustResize), and disabling it must tear the
+        // fix back down.
+        FullScreenWorkAround.applyIfNeeded(this);
         // Render into the display cutout area (punch-hole camera) while immersive,
         // otherwise Android letterboxes the window and the status bar area stays
         // empty. Restored to default when the toggle is off.
@@ -1016,6 +1028,14 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
     public TermuxAppSharedProperties getProperties() {
         return mProperties;
+    }
+
+    public FullScreenWorkAround getFullScreenWorkAround() {
+        return mFullScreenWorkAround;
+    }
+
+    public void setFullScreenWorkAround(FullScreenWorkAround fullScreenWorkAround) {
+        mFullScreenWorkAround = fullScreenWorkAround;
     }
 
 
