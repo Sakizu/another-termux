@@ -94,6 +94,16 @@ public class TermuxAppSharedPreferences extends AppSharedPreferences {
 
 
 
+    public boolean isImmersiveModeEnabled() {
+        return SharedPreferenceUtils.getBoolean(mSharedPreferences, TERMUX_APP.KEY_IMMERSIVE_MODE, TERMUX_APP.DEFAULT_IMMERSIVE_MODE);
+    }
+
+    public void setImmersiveMode(boolean value) {
+        SharedPreferenceUtils.setBoolean(mSharedPreferences, TERMUX_APP.KEY_IMMERSIVE_MODE, value, false);
+    }
+
+
+
     public boolean isSoftKeyboardEnabled() {
         return SharedPreferenceUtils.getBoolean(mSharedPreferences, TERMUX_APP.KEY_SOFT_KEYBOARD_ENABLED, TERMUX_APP.DEFAULT_VALUE_KEY_SOFT_KEYBOARD_ENABLED);
     }

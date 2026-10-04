@@ -97,6 +97,16 @@ public final class TermuxPreferenceConstants {
 
 
         /**
+         * Defines the key for whether immersive mode is enabled or not.
+         * When enabled, the status and navigation bars are hidden for a
+         * full-screen terminal; they can be revealed temporarily with an
+         * edge swipe.
+         */
+        public static final String KEY_IMMERSIVE_MODE =  "immersive_mode";
+        public static final boolean DEFAULT_IMMERSIVE_MODE = false;
+
+
+        /**
          * Defines the key for whether to show terminal toolbar containing extra keys and text input field.
          */
         public static final String KEY_SHOW_TERMINAL_TOOLBAR = "show_extra_keys";

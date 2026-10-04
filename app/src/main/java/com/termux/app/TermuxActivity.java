@@ -58,9 +58,12 @@ import com.termux.terminal.TerminalSessionClient;
 import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
 
+import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -242,6 +245,8 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         }
 
+        setImmersiveMode();
+
         setTermuxTerminalViewAndClients();
 
         setTerminalToolbarView(savedInstanceState);
@@ -309,6 +314,9 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         Logger.logVerbose(LOG_TAG, "onResume");
 
         if (mIsInvalidState) return;
+
+        // Re-apply in case the setting was toggled while in the Settings activity
+        setImmersiveMode();
 
         if (mTermuxTerminalSessionActivityClient != null)
             mTermuxTerminalSessionActivityClient.onResume();
@@ -467,6 +475,28 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         int marginHorizontal = mProperties.getTerminalMarginHorizontal();
         int marginVertical = mProperties.getTerminalMarginVertical();
         ViewUtils.setLayoutMarginsInDp(relativeLayout, marginHorizontal, marginVertical, marginHorizontal, marginVertical);
+    }
+
+    /**
+     * Applies immersive mode if enabled in settings: hides the status and
+     * navigation bars for a full-screen terminal. The bars can be revealed
+     * temporarily with an edge swipe. Must be re-applied whenever the window
+     * regains focus, since the system may restore the bars (e.g. after a
+     * dialog is dismissed or the notification shade is pulled down).
+     */
+    private void setImmersiveMode() {
+        if (mPreferences == null || !mPreferences.isImmersiveModeEnabled()) return;
+        WindowInsetsControllerCompat controller =
+            new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
+        controller.setSystemBarsBehavior(
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        controller.hide(WindowInsetsCompat.Type.systemBars());
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) setImmersiveMode();
     }
 
 

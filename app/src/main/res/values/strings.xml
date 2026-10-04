@@ -216,6 +216,13 @@
                     It should be enabled to try to fix the issue where soft keyboard covers part of extra keys/terminal view.
                     If it causes screen flickering on your devices, then disable it. (Default)</string>
 
+                <!-- Immersive Mode -->
+                <string name="termux_terminal_view_immersive_mode_title">Immersive Mode</string>
+                <string name="termux_terminal_view_immersive_mode_off">Immersive mode will be disabled.</string>
+                <string name="termux_terminal_view_immersive_mode_on">Immersive mode will be enabled.
+                    The status and navigation bars will be hidden for a full-screen terminal.
+                    Swipe from the screen edge to reveal them temporarily.</string>
+
 
 
     <!-- Termux:API App Preferences -->
