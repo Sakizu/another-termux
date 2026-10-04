@@ -39,19 +39,6 @@
         android:padding="6dp"
         android:textSize="14sp" />
 
-    <EditText
-        android:id="@+id/session_rename_field"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:visibility="gone"
-        android:singleLine="true"
-        android:imeOptions="actionDone"
-        android:inputType="text"
-        android:background="@null"
-        android:padding="6dp"
-        android:textSize="14sp" />
-
     <ImageButton
         android:id="@+id/session_menu_button"
         android:layout_width="40dp"
