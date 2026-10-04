@@ -129,14 +129,14 @@ runs only when the toggle actually changes. While enabled, only the bar-hide is 
 on focus gain. Disabling restores the previous state and re-applies the legacy
 `FLAG_FULLSCREEN` if the `fullscreen` property is set.
 
-The two-mode split itself is an uncommitted working-tree change on top of all this.
+The two-mode split itself is [`028cc73`](https://github.com/Sakizu/another-termux/commit/028cc73dcd2ee8527d3b71c60df6b2191d7ae867).
 `setImmersiveMode()` now tracks a three-state value (0 = off, 1 = hide bars, 2 = full) and
 restores the stock window state first before applying the target mode, so switching
 directly from one mode to the other works without either mode knowing about the other.
 Steady-state behavior is unchanged: only the bar-hide is re-applied on focus gain, for
-whichever mode is active. `FullScreenWorkAround` was checked and deliberately left alone:
-both its enable gate and the nav-bar compensation key off the full-immersive preference
-only, which is correct since the hide-bars mode needs neither.
+whichever mode is active.
+
+[`035ed4a`](https://github.com/Sakizu/another-termux/commit/035ed4abf3fae2e21584a9a37b8fdbd3d76135f7) fixed the extra-keys row in full immersive mode: in edge-to-edge layout the framework no longer resizes the window for the soft keyboard, so the extra-keys row stayed behind the keyboard. `FullScreenWorkAround` (previously only for the legacy fullscreen option) is now lifecycle-aware and also applies during full immersive mode, with the nav-bar compensation set to zero since immersive hides the bars. It deactivates cleanly when immersive is turned off, restoring the original height so the framework resize takes over again. The hide-bars mode needs none of this: its layout is untouched, so the stock keyboard behavior applies.
 
 ## 4. Performance work ([`244219f`](https://github.com/Sakizu/another-termux/commit/244219f4888e5369d7cef32e6f53912f1a4ac694), 19 files)
 
