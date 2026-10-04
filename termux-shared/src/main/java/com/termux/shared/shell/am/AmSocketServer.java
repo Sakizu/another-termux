@@ -23,6 +23,7 @@ import com.termux.shared.shell.ArgumentTokenizer;
 import com.termux.shared.shell.command.ExecutionCommand;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -64,7 +65,7 @@ public class AmSocketServer {
     /**
      * Maximum number of chars of the am command string read from a client (~1MiB).
      * {@link LocalClientSocket#readDataOnInputStream} reads until end of stream with no
-     * size limit of its own, so the cap is enforced with a {@link BoundedStringBuilder}
+     * size limit of its own, so the cap is enforced with a {@link BoundedAppendable}
      * to bound server memory usage per client.
      */
     public static final int MAX_AM_COMMAND_STRING_LENGTH = 1024 * 1024;
@@ -94,7 +95,7 @@ public class AmSocketServer {
         // Read amCommandString client sent and close input stream. A bounded buffer is
         // used so that a client cannot exhaust server memory by sending an unbounded
         // command; the read fails with an error once the cap is exceeded.
-        BoundedStringBuilder data = new BoundedStringBuilder(MAX_AM_COMMAND_STRING_LENGTH);
+        BoundedAppendable data = new BoundedAppendable(MAX_AM_COMMAND_STRING_LENGTH);
         error = clientSocket.readDataOnInputStream(data, true);
         if (error != null) {
             sendResultToClient(localSocketManager, clientSocket, 1, null, error.toString());
@@ -254,26 +255,50 @@ public class AmSocketServer {
 
 
     /**
-     * A {@link StringBuilder} that throws {@link IllegalStateException} once more than
-     * {@code maxLength} chars are appended. {@link LocalClientSocket#readDataOnInputStream}
-     * appends one char at a time and converts any thrown {@link Exception} into the
-     * {@link Error} it returns, so exceeding the cap surfaces as a read error and the
-     * command is rejected instead of being silently truncated.
+     * An {@link Appendable} that throws {@link IOException} once more than {@code maxLength}
+     * chars are appended. {@link LocalClientSocket#readDataOnInputStream} appends one char at
+     * a time and converts a thrown {@link IOException} into the {@link Error} it returns, so
+     * exceeding the cap surfaces as a read error and the command is rejected instead of
+     * being silently truncated. Composition is used because {@link StringBuilder} is final
+     * and cannot be subclassed.
      */
-    private static class BoundedStringBuilder extends StringBuilder {
+    private static class BoundedAppendable implements Appendable {
 
+        private final StringBuilder delegate = new StringBuilder();
         private final int maxLength;
 
-        BoundedStringBuilder(int maxLength) {
+        BoundedAppendable(int maxLength) {
             this.maxLength = maxLength;
         }
 
-        @Override
-        public StringBuilder append(char c) {
-            if (length() >= maxLength) {
-                throw new IllegalStateException("Am command exceeds max length of " + maxLength + " chars");
+        private void checkCapacity() throws IOException {
+            if (delegate.length() >= maxLength) {
+                throw new IOException("Am command exceeds max length of " + maxLength + " chars");
             }
-            return super.append(c);
+        }
+
+        @Override
+        public Appendable append(char c) throws IOException {
+            checkCapacity();
+            delegate.append(c);
+            return this;
+        }
+
+        @Override
+        public Appendable append(CharSequence csq) throws IOException {
+            if (csq == null) return append("null");
+            for (int i = 0; i < csq.length(); i++) append(csq.charAt(i));
+            return this;
+        }
+
+        @Override
+        public Appendable append(CharSequence csq, int start, int end) throws IOException {
+            return append(csq == null ? "null" : csq.subSequence(start, end));
+        }
+
+        @Override
+        public String toString() {
+            return delegate.toString();
         }
 
     }

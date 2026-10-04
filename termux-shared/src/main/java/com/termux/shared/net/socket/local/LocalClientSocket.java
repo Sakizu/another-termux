@@ -186,7 +186,7 @@ public class LocalClientSocket implements Closeable {
      * @return Returns the {@code error} if reading was not successful containing {@link JniResult}
      * error {@link String}, otherwise {@code null}.
      */
-    public Error readDataOnInputStream(@NonNull StringBuilder data, boolean closeStreamOnFinish) {
+    public Error readDataOnInputStream(@NonNull Appendable data, boolean closeStreamOnFinish) {
         int c;
         InputStreamReader inputStreamReader = getInputStreamReader();
         try {
