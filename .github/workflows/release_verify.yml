@@ -1,0 +1,69 @@
+name: Release verify
+
+# Manual-only verification that the release build path works: with ABI splits
+# disabled (the F-Droid configuration), app/build.gradle restricts the native
+# build to arm64-v8a via ndk.abiFilters instead. CI normally builds debug
+# only, so this workflow exists to prove that branch configures, compiles
+# (including ProGuard), and packages. Trigger from the Actions tab.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 11
+        # AGP 4.2.2 + Gradle 7.2 predate the runner's default JDK (Temurin 17).
+        # Java 11 is the newest JDK this Gradle/AGP combo officially supports.
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Build release APK
+        shell: bash {0}
+        env:
+          PACKAGE_VARIANT: apt-android-7
+        run: |
+          exit_on_error() { echo "$1"; exit 1; }
+
+          GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
+          CURRENT_VERSION_NAME="$(grep -m 1 -E '\s+versionName "([^"]+)"$' ./app/build.gradle | sed -r 's/\s+versionName "([^"]+)"$/\1/')"
+          RELEASE_VERSION_NAME="v$CURRENT_VERSION_NAME+$GITHUB_SHA_SHORT"
+          APK_VERSION_TAG="$RELEASE_VERSION_NAME-${PACKAGE_VARIANT}-github-release-verify"
+          APK_BASENAME_PREFIX="termux-app_$APK_VERSION_TAG"
+          APK_DIR_PATH="./app/build/outputs/apk/release"
+
+          echo "APK_DIR_PATH=$APK_DIR_PATH" >> $GITHUB_ENV
+          echo "APK_BASENAME_PREFIX=$APK_BASENAME_PREFIX" >> $GITHUB_ENV
+
+          export TERMUX_APP_VERSION_NAME="${RELEASE_VERSION_NAME/v/}" # Used by app/build.gradle
+          export TERMUX_APK_VERSION_TAG="$APK_VERSION_TAG" # Used by app/build.gradle
+          export TERMUX_PACKAGE_VARIANT="$PACKAGE_VARIANT" # Used by app/build.gradle
+          # Release has no signingConfig; inject the in-repo debug keystore so
+          # the APK can be packaged and inspected. Not for distribution.
+          if ! ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file="$PWD/app/testkey_untrusted.jks" \
+            -Pandroid.injected.signing.store.password=xrj45yWGLbsO7W0v \
+            -Pandroid.injected.signing.key.alias=alias \
+            -Pandroid.injected.signing.key.password=xrj45yWGLbsO7W0v; then
+            exit_on_error "Release build failed."
+          fi
+
+          echo "Validating APKs"
+          # Splits are off for release, so a single APK is expected.
+          if ! test -f "$APK_DIR_PATH/${APK_BASENAME_PREFIX}_universal.apk"; then
+            files_found="$(ls "$APK_DIR_PATH")"
+            exit_on_error "Failed to find built APK at '$APK_DIR_PATH/${APK_BASENAME_PREFIX}_universal.apk'. Files found: "$'\n'"$files_found"
+          fi
+
+      - name: Attach release APK file
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_BASENAME_PREFIX }}_universal
+          path: |
+            ${{ env.APK_DIR_PATH }}/${{ env.APK_BASENAME_PREFIX }}_universal.apk
+            ${{ env.APK_DIR_PATH }}/output-metadata.json
