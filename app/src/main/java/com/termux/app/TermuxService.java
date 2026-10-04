@@ -613,9 +613,9 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
             mShellManager.mPendingPluginExecutionCommands.remove(executionCommand);
 
         // Notify {@link TermuxSessionsListViewController} that sessions list has been updated if
-        // activity in is foreground
+        // activity in is foreground (targeted: animate in the new row)
         if (mTermuxTerminalSessionActivityClient != null)
-            mTermuxTerminalSessionActivityClient.termuxSessionListNotifyUpdated();
+            mTermuxTerminalSessionActivityClient.notifySessionInserted(mShellManager.mTermuxSessions.size() - 1);
 
         updateNotification();
 
@@ -647,12 +647,13 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
             if (executionCommand != null && executionCommand.isPluginExecutionCommand)
                 TermuxPluginUtils.processPluginExecutionCommandResult(this, LOG_TAG, executionCommand);
 
+            int indexOfSession = mShellManager.mTermuxSessions.indexOf(termuxSession);
             mShellManager.mTermuxSessions.remove(termuxSession);
 
             // Notify {@link TermuxSessionsListViewController} that sessions list has been updated if
-            // activity in is foreground
+            // activity in is foreground (targeted: animate out the removed row)
             if (mTermuxTerminalSessionActivityClient != null)
-                mTermuxTerminalSessionActivityClient.termuxSessionListNotifyUpdated();
+                mTermuxTerminalSessionActivityClient.notifySessionRemoved(indexOfSession);
         }
 
         updateNotification();

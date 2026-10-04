@@ -35,7 +35,9 @@ import com.termux.terminal.TextStyle;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.util.HashSet;
 import java.util.Properties;
+import java.util.Set;
 
 /** The {@link TerminalSessionClient} implementation that may require an {@link Activity} for its interface methods. */
 public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionClientBase {
@@ -43,6 +45,11 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
     private final TermuxActivity mActivity;
 
     private static final int MAX_SESSIONS = 8;
+
+    /** Sessions the user asked to kill via the drawer; their rows are removed
+     *  when the session exits (a SIGKILLed shell exits with -9, which the stock
+     *  auto-remove does not cover). All access is on the main thread. */
+    private final Set<TerminalSession> mKillRequestedSessions = new HashSet<>();
 
     private SoundPool mBellSoundPool;
 
@@ -132,11 +139,17 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
             mActivity.showToast(toToastTitle(updatedSession), true);
         }
 
-        termuxSessionListNotifyUpdated();
+        // Targeted refresh: only this session's row changed.
+        notifySessionChanged(updatedSession);
     }
 
     @Override
     public void onSessionFinished(@NonNull TerminalSession finishedSession) {
+        // A user-requested kill must remove the drawer row even though a
+        // SIGKILLed shell exits with -9, which the stock auto-remove below
+        // does not cover.
+        boolean killRequested = mKillRequestedSessions.remove(finishedSession);
+
         TermuxService service = mActivity.getTermuxService();
 
         if (service == null || service.wantsToStop()) {
@@ -168,13 +181,13 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
         if (mActivity.getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
             // On Android TV devices we need to use older behaviour because we may
             // not be able to have multiple launcher icons.
-            if (service.getTermuxSessionsSize() > 1 || isPluginExecutionCommandWithPendingResult) {
+            if (service.getTermuxSessionsSize() > 1 || isPluginExecutionCommandWithPendingResult || killRequested) {
                 removeFinishedSession(finishedSession);
             }
         } else {
             // Once we have a separate launcher icon for the failsafe session, it
             // should be safe to auto-close session on exit code '0' or '130'.
-            if (finishedSession.getExitStatus() == 0 || finishedSession.getExitStatus() == 130 || isPluginExecutionCommandWithPendingResult) {
+            if (finishedSession.getExitStatus() == 0 || finishedSession.getExitStatus() == 130 || isPluginExecutionCommandWithPendingResult || killRequested) {
                 removeFinishedSession(finishedSession);
             }
         }
@@ -453,6 +466,37 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
 
     public void termuxSessionListNotifyUpdated() {
         mActivity.termuxSessionListNotifyUpdated();
+    }
+
+    /** Refresh only the drawer row for the given session. */
+    public void notifySessionChanged(@NonNull TerminalSession session) {
+        mActivity.notifySessionChanged(session);
+    }
+
+    /** Animate in the drawer row for a newly added session. */
+    public void notifySessionInserted(int position) {
+        mActivity.notifySessionInserted(position);
+    }
+
+    /** Animate out the drawer row for a removed session. */
+    public void notifySessionRemoved(int position) {
+        mActivity.notifySessionRemoved(position);
+    }
+
+    /**
+     * Kill a session on explicit user request (drawer ⋮ menu).
+     *
+     * Like the stock kill, this SIGKILLs the shell, but unlike the stock
+     * dialog the drawer row is also removed once the session exits.
+     */
+    public void requestKillSession(@NonNull TerminalSession session) {
+        if (!session.isRunning()) {
+            // Already dead: drop it right away like tapping a finished session.
+            removeFinishedSession(session);
+            return;
+        }
+        mKillRequestedSessions.add(session);
+        session.finishIfRunning();
     }
 
     public void checkAndScrollToSession(TerminalSession session) {

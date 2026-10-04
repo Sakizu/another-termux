@@ -37,7 +37,8 @@
         android:maxLines="2"
         android:gravity="start|center_vertical"
         android:padding="6dp"
-        android:textSize="14sp" />
+        android:textSize="14sp"
+        android:typeface="monospace" />
 
     <ImageButton
         android:id="@+id/session_menu_button"

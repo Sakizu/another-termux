@@ -857,7 +857,26 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
 
     public void termuxSessionListNotifyUpdated() {
-        mTermuxSessionListViewController.notifyDataSetChanged();
+        if (mTermuxSessionListViewController != null)
+            mTermuxSessionListViewController.notifyDataSetChanged();
+    }
+
+    /** Refresh only the drawer row for the given session. */
+    public void notifySessionChanged(TerminalSession session) {
+        if (mTermuxSessionListViewController != null)
+            mTermuxSessionListViewController.notifySessionChanged(session);
+    }
+
+    /** Animate in the drawer row for a newly added session. */
+    public void notifySessionInserted(int position) {
+        if (mTermuxSessionListViewController != null)
+            mTermuxSessionListViewController.notifySessionInserted(position);
+    }
+
+    /** Animate out the drawer row for a removed session. */
+    public void notifySessionRemoved(int position) {
+        if (mTermuxSessionListViewController != null)
+            mTermuxSessionListViewController.notifySessionRemoved(position);
     }
 
     public boolean isVisible() {

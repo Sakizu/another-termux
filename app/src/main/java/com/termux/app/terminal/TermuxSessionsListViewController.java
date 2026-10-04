@@ -154,7 +154,7 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
             return;
         }
 
-        showTitleLabel(holder, sessionAtRow, position);
+        showTitleLabel(holder, sessionAtRow);
 
         // Row background follows the theme, like the stock drawer did.
         boolean shouldEnableDarkTheme = ThemeUtils.shouldEnableDarkTheme(mActivity, NightMode.getAppNightMode().getName());
@@ -173,6 +173,42 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         return mSessionList == null ? 0 : mSessionList.size();
     }
 
+    /** Adapter position of the row showing the given session, or -1. */
+    private int indexOfSession(@NonNull TerminalSession session) {
+        if (mSessionList == null) return -1;
+        for (int i = 0; i < mSessionList.size(); i++) {
+            TermuxSession termuxSession = mSessionList.get(i);
+            if (termuxSession != null && termuxSession.getTerminalSession() == session)
+                return i;
+        }
+        return -1;
+    }
+
+    /** Refresh only the row for the given session (e.g. on title change). */
+    public void notifySessionChanged(@NonNull TerminalSession session) {
+        int index = indexOfSession(session);
+        if (index >= 0)
+            notifyItemChanged(index);
+    }
+
+    /** Animate in the row for a newly added session. */
+    public void notifySessionInserted(int position) {
+        if (position >= 0 && position <= getItemCount())
+            notifyItemInserted(position);
+        else
+            notifyDataSetChanged();
+    }
+
+    /** Animate out the row for a removed session. */
+    public void notifySessionRemoved(int position) {
+        // getItemCount() is already decremented, so the removed row was at
+        // most at getItemCount().
+        if (position >= 0 && position <= getItemCount())
+            notifyItemRemoved(position);
+        else
+            notifyDataSetChanged();
+    }
+
     private TermuxSession getSessionAt(int position) {
         if (mSessionList == null || position < 0 || position >= mSessionList.size())
             return null;
@@ -180,7 +216,7 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
     }
 
     @SuppressLint("SetTextI18n")
-    private void showTitleLabel(@NonNull SessionViewHolder holder, @NonNull TerminalSession sessionAtRow, int position) {
+    private void showTitleLabel(@NonNull SessionViewHolder holder, @NonNull TerminalSession sessionAtRow) {
         holder.titleView.setVisibility(View.VISIBLE);
         TextView sessionTitleView = holder.titleView;
 
@@ -198,7 +234,6 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
         fullSessionTitleStyled.setSpan(boldSpan, 0, sessionNamePart.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         fullSessionTitleStyled.setSpan(italicSpan, sessionNamePart.length(), fullSessionTitle.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
-        sessionTitleView.setTypeface(Typeface.MONOSPACE);
         sessionTitleView.setText(fullSessionTitleStyled);
 
         boolean sessionRunning = sessionAtRow.isRunning();
@@ -254,11 +289,9 @@ public class TermuxSessionsListViewController extends RecyclerView.Adapter<Termu
             .setMessage(R.string.title_confirm_kill_process)
             .setPositiveButton(android.R.string.yes, (dialog, which) -> {
                 dialog.dismiss();
-                // Same as stock kill: SIGKILL the shell; the exit callback
-                // (onTermuxSessionExited) removes the session and refreshes
-                // the drawer. removeTermuxSession() is a no-op for sessions
-                // that are still running, so it must not be used here.
-                sessionAtRow.finishIfRunning();
+                // SIGKILL the shell like the stock kill; the client removes
+                // the drawer row once the session exits.
+                mActivity.getTermuxTerminalSessionClient().requestKillSession(sessionAtRow);
             })
             .setNegativeButton(android.R.string.no, null)
             .show();
