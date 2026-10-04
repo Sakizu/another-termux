@@ -715,7 +715,7 @@ public class PackageUtils {
     public static String setComponentState(@NonNull final Context context, @NonNull String packageName,
                                            @NonNull String className, boolean newState, String toastString,
                                            boolean showErrorMessage) {
-        return setComponentState(context, packageName, className, newState, toastString, showErrorMessage, true);
+        return setComponentState(context, packageName, className, newState, toastString, true, showErrorMessage);
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.termux.shared.net.socket.local;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.termux.shared.errors.Error;
 import com.termux.shared.file.FileUtils;
@@ -26,8 +27,12 @@ public class LocalServerSocket implements Closeable {
     /** The {@link ILocalSocketManager} client for the {@link LocalSocketManager}. */
     @NonNull protected final ILocalSocketManager mLocalSocketManagerClient;
 
-    /** The {@link ClientSocketListener} {@link Thread} for the {@link LocalServerSocket}. */
-    @NonNull protected final Thread mClientSocketListener;
+    /**
+     * The {@link ClientSocketListener} {@link Thread} for the {@link LocalServerSocket}.
+     * Created in {@link #start()} since a {@link Thread} cannot be started twice, so that
+     * the server can be restarted after {@link #stop()}.
+     */
+    @Nullable protected Thread mClientSocketListener;
 
     /**
      * The required permissions for server socket file parent directory.
@@ -45,12 +50,20 @@ public class LocalServerSocket implements Closeable {
         mLocalSocketManager = localSocketManager;
         mLocalSocketRunConfig = localSocketManager.getLocalSocketRunConfig();
         mLocalSocketManagerClient = mLocalSocketRunConfig.getLocalSocketManagerClient();
-        mClientSocketListener = new Thread(new ClientSocketListener());
     }
 
     /** Start server by creating server socket. */
     public synchronized Error start() {
         Logger.logDebug(LOG_TAG, "start");
+
+        // If a previous start is still active (start() called without an
+        // intervening stop()), stop it first so its listener thread is shut
+        // down cleanly instead of being leaked by the reassignment below.
+        if (mClientSocketListener != null && mClientSocketListener.isAlive()) {
+            Error stopError = stop();
+            if (stopError != null)
+                return stopError;
+        }
 
         String path = mLocalSocketRunConfig.getPath();
         if (path == null || path.isEmpty()) {
@@ -111,6 +124,9 @@ public class LocalServerSocket implements Closeable {
         // Update fd to signify that server socket has been created successfully
         mLocalSocketRunConfig.setFD(fd);
 
+        // Create a new listener thread on every start since a terminated thread cannot
+        // be started again, which would otherwise make a stop() -> start() restart fail.
+        mClientSocketListener = new Thread(new ClientSocketListener());
         mClientSocketListener.setUncaughtExceptionHandler(mLocalSocketManager.getLocalSocketManagerClientThreadUEH());
 
         try {
@@ -127,10 +143,16 @@ public class LocalServerSocket implements Closeable {
     public synchronized Error stop() {
         Logger.logDebug(LOG_TAG, "stop");
 
-        try {
-            // Stop the LocalClientSocket listener.
-            mClientSocketListener.interrupt();
-        } catch (Exception ignored) {}
+        // Clear the thread reference so a later start() creates a fresh thread and a
+        // repeated stop() without an intervening start() is a no-op.
+        Thread clientSocketListener = mClientSocketListener;
+        mClientSocketListener = null;
+        if (clientSocketListener != null) {
+            try {
+                // Stop the LocalClientSocket listener.
+                clientSocketListener.interrupt();
+            } catch (Exception ignored) {}
+        }
 
         Error error = closeServerSocket(false);
         if (error != null)

@@ -62,6 +62,14 @@ public class AmSocketServer {
     public static final String LOG_TAG = "AmSocketServer";
 
     /**
+     * Maximum number of chars of the am command string read from a client (~1MiB).
+     * {@link LocalClientSocket#readDataOnInputStream} reads until end of stream with no
+     * size limit of its own, so the cap is enforced with a {@link BoundedStringBuilder}
+     * to bound server memory usage per client.
+     */
+    public static final int MAX_AM_COMMAND_STRING_LENGTH = 1024 * 1024;
+
+    /**
      * Create the {@link AmSocketServer} {@link LocalServerSocket} and start listening for new {@link LocalClientSocket}.
      *
      * @param context The {@link Context} for {@link LocalSocketManager}.
@@ -83,8 +91,10 @@ public class AmSocketServer {
                                        @NonNull LocalClientSocket clientSocket) {
         Error error;
 
-        // Read amCommandString client sent and close input stream
-        StringBuilder data = new StringBuilder();
+        // Read amCommandString client sent and close input stream. A bounded buffer is
+        // used so that a client cannot exhaust server memory by sending an unbounded
+        // command; the read fails with an error once the cap is exceeded.
+        BoundedStringBuilder data = new BoundedStringBuilder(MAX_AM_COMMAND_STRING_LENGTH);
         error = clientSocket.readDataOnInputStream(data, true);
         if (error != null) {
             sendResultToClient(localSocketManager, clientSocket, 1, null, error.toString());
@@ -242,6 +252,31 @@ public class AmSocketServer {
 
 
 
+
+    /**
+     * A {@link StringBuilder} that throws {@link IllegalStateException} once more than
+     * {@code maxLength} chars are appended. {@link LocalClientSocket#readDataOnInputStream}
+     * appends one char at a time and converts any thrown {@link Exception} into the
+     * {@link Error} it returns, so exceeding the cap surfaces as a read error and the
+     * command is rejected instead of being silently truncated.
+     */
+    private static class BoundedStringBuilder extends StringBuilder {
+
+        private final int maxLength;
+
+        BoundedStringBuilder(int maxLength) {
+            this.maxLength = maxLength;
+        }
+
+        @Override
+        public StringBuilder append(char c) {
+            if (length() >= maxLength) {
+                throw new IllegalStateException("Am command exceeds max length of " + maxLength + " chars");
+            }
+            return super.append(c);
+        }
+
+    }
 
     /** Implementation for {@link ILocalSocketManager} for {@link AmSocketServer}. */
     public abstract static class AmSocketServerClient extends LocalSocketManagerClientBase {

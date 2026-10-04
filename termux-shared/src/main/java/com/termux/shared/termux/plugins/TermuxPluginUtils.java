@@ -401,8 +401,13 @@ public class TermuxPluginUtils {
 
         // Send the notification
         NotificationManager notificationManager = NotificationUtils.getNotificationManager(termuxPackageContext);
-        if (notificationManager != null)
-            notificationManager.notify(nextNotificationId, builder.build());
+        if (notificationManager != null) {
+            try {
+                notificationManager.notify(nextNotificationId, builder.build());
+            } catch (Exception e) {
+                Logger.logStackTraceWithMessage(logTag, "Failed to send \"" + title + "\" notification", e);
+            }
+        }
     }
 
     /**

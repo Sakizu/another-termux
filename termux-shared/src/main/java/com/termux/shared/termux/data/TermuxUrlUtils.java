@@ -6,10 +6,13 @@ import java.util.regex.Pattern;
 
 public class TermuxUrlUtils {
 
-    public static Pattern URL_MATCH_REGEX;
+    /** Lazily initialized URL match regex. Volatile so the racy check-then-act init in
+     * {@link #getUrlMatchRegex()} safely publishes the compiled pattern across threads. */
+    public static volatile Pattern URL_MATCH_REGEX;
 
     public static Pattern getUrlMatchRegex() {
-        if (URL_MATCH_REGEX != null) return URL_MATCH_REGEX;
+        Pattern pattern = URL_MATCH_REGEX;
+        if (pattern != null) return pattern;
 
         StringBuilder regex_sb = new StringBuilder();
 
@@ -89,6 +92,8 @@ public class TermuxUrlUtils {
 
     public static LinkedHashSet<CharSequence> extractUrls(String text) {
         LinkedHashSet<CharSequence> urlSet = new LinkedHashSet<>();
+        if (text == null) return urlSet;
+
         Matcher matcher = getUrlMatchRegex().matcher(text);
 
         while (matcher.find()) {

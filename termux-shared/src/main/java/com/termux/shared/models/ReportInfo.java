@@ -111,7 +111,8 @@ public class ReportInfo implements Serializable {
             markdownString.append("\n##\n\n");
         }
 
-        markdownString.append(reportInfo.reportString);
+        if (reportInfo.reportString != null)
+            markdownString.append(reportInfo.reportString);
 
         return markdownString.toString();
     }

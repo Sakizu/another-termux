@@ -17,11 +17,31 @@ import com.termux.shared.termux.settings.preferences.TermuxPreferenceConstants.T
 
 public class TermuxAppSharedPreferences extends AppSharedPreferences {
 
-    private int MIN_FONTSIZE;
-    private int MAX_FONTSIZE;
-    private int DEFAULT_FONTSIZE;
+    private volatile int MIN_FONTSIZE;
+    private volatile int MAX_FONTSIZE;
+    private volatile int DEFAULT_FONTSIZE;
 
     private static final String LOG_TAG = "TermuxAppSharedPreferences";
+
+    /**
+     * Single static monitor for this class. It guards lazy initialization of
+     * {@link #sCachedInstance} and serializes all boot-counter increments.
+     *
+     * A static lock is required instead of synchronizing on the instance because
+     * {@link #build(Context)} used to return a fresh instance on every call, so
+     * instance-level monitors gave zero mutual exclusion between concurrent command
+     * spawns and the boot counters could be double-incremented.
+     */
+    private static final Object sLock = new Object();
+
+    /**
+     * Per-process cached instance. Building one requires a {@code createPackageContext}
+     * binder IPC, so the first successful build is cached and reused instead of paying
+     * the IPC cost on every spawned command. Volatile for safe publication of the
+     * fully constructed instance to other threads.
+     */
+    @Nullable
+    private static volatile TermuxAppSharedPreferences sCachedInstance;
 
     private TermuxAppSharedPreferences(@NonNull Context context) {
         super(context,
@@ -36,21 +56,46 @@ public class TermuxAppSharedPreferences extends AppSharedPreferences {
     /**
      * Get {@link TermuxAppSharedPreferences}.
      *
+     * The first successful build is cached per process and reused by later calls, so
+     * the {@code createPackageContext} binder IPC is only paid once instead of on
+     * every spawned command. A failed build is not cached and returns {@code null}
+     * like before.
+     *
      * @param context The {@link Context} to use to get the {@link Context} of the
      *                {@link TermuxConstants#TERMUX_PACKAGE_NAME}.
      * @return Returns the {@link TermuxAppSharedPreferences}. This will {@code null} if an exception is raised.
      */
     @Nullable
     public static TermuxAppSharedPreferences build(@NonNull final Context context) {
-        Context termuxPackageContext = PackageUtils.getContextForPackage(context, TermuxConstants.TERMUX_PACKAGE_NAME);
-        if (termuxPackageContext == null)
-            return null;
-        else
-            return new TermuxAppSharedPreferences(termuxPackageContext);
+        TermuxAppSharedPreferences preferences = getCachedInstance(context);
+        if (preferences != null)
+            return preferences;
+
+        synchronized (sLock) {
+            preferences = sCachedInstance;
+            if (preferences != null) {
+                // Another thread built it while we waited; refresh display-dependent state.
+                preferences.setFontVariables(context);
+                return preferences;
+            }
+
+            Context termuxPackageContext = PackageUtils.getContextForPackage(context, TermuxConstants.TERMUX_PACKAGE_NAME);
+            if (termuxPackageContext == null)
+                return null;
+
+            preferences = new TermuxAppSharedPreferences(termuxPackageContext);
+            sCachedInstance = preferences;
+            return preferences;
+        }
     }
 
     /**
      * Get {@link TermuxAppSharedPreferences}.
+     *
+     * The first successful build is cached per process and reused by later calls, so
+     * the {@code createPackageContext} binder IPC is only paid once instead of on
+     * every spawned command. A failed build is not cached; the {@code exitAppOnError}
+     * behaviour on failure is unchanged.
      *
      * @param context The {@link Context} to use to get the {@link Context} of the
      *                {@link TermuxConstants#TERMUX_PACKAGE_NAME}.
@@ -59,11 +104,45 @@ public class TermuxAppSharedPreferences extends AppSharedPreferences {
      * @return Returns the {@link TermuxAppSharedPreferences}. This will {@code null} if an exception is raised.
      */
     public static TermuxAppSharedPreferences build(@NonNull final Context context, final boolean exitAppOnError) {
-        Context termuxPackageContext = TermuxUtils.getContextForPackageOrExitApp(context, TermuxConstants.TERMUX_PACKAGE_NAME, exitAppOnError);
-        if (termuxPackageContext == null)
+        TermuxAppSharedPreferences preferences = getCachedInstance(context);
+        if (preferences != null)
+            return preferences;
+
+        synchronized (sLock) {
+            preferences = sCachedInstance;
+            if (preferences != null) {
+                // Another thread built it while we waited; refresh display-dependent state.
+                preferences.setFontVariables(context);
+                return preferences;
+            }
+
+            Context termuxPackageContext = TermuxUtils.getContextForPackageOrExitApp(context, TermuxConstants.TERMUX_PACKAGE_NAME, exitAppOnError);
+            if (termuxPackageContext == null)
+                return null;
+
+            preferences = new TermuxAppSharedPreferences(termuxPackageContext);
+            sCachedInstance = preferences;
+            return preferences;
+        }
+    }
+
+    /**
+     * Get the cached per-process instance, or {@code null} if nothing was built yet.
+     * Display-dependent font size bounds are refreshed from the caller's context so a
+     * cached instance behaves like a freshly built one when display metrics change at
+     * runtime. The writes are guarded by {@link #sLock}; the fields are volatile so
+     * readers always see a consistently published triple.
+     */
+    @Nullable
+    private static TermuxAppSharedPreferences getCachedInstance(@NonNull final Context context) {
+        TermuxAppSharedPreferences preferences = sCachedInstance;
+        if (preferences == null)
             return null;
-        else
-            return new TermuxAppSharedPreferences(termuxPackageContext);
+
+        synchronized (sLock) {
+            preferences.setFontVariables(context);
+        }
+        return preferences;
     }
 
 
@@ -219,30 +298,44 @@ public class TermuxAppSharedPreferences extends AppSharedPreferences {
     }
 
 
-    public synchronized int getAndIncrementAppShellNumberSinceBoot() {
+    public int getAndIncrementAppShellNumberSinceBoot() {
         // Keep value at MAX_VALUE on integer overflow and not 0, since not first shell.
         // apply() (async disk write) is enough here: the in-memory update is synchronous
         // and the counter is only read in-process, so command startup is not blocked on I/O.
-        return SharedPreferenceUtils.getAndIncrementInt(mSharedPreferences, TERMUX_APP.KEY_APP_SHELL_NUMBER_SINCE_BOOT,
-            TERMUX_APP.DEFAULT_VALUE_APP_SHELL_NUMBER_SINCE_BOOT, false, Integer.MAX_VALUE);
+        // Synchronized on the static lock, not the instance monitor: every spawned command
+        // used to get its own instance, so instance locks gave no mutual exclusion and two
+        // concurrent spawns could read the same value and double-increment.
+        synchronized (sLock) {
+            return SharedPreferenceUtils.getAndIncrementInt(mSharedPreferences, TERMUX_APP.KEY_APP_SHELL_NUMBER_SINCE_BOOT,
+                TERMUX_APP.DEFAULT_VALUE_APP_SHELL_NUMBER_SINCE_BOOT, false, Integer.MAX_VALUE);
+        }
     }
 
-    public synchronized void resetAppShellNumberSinceBoot() {
-        SharedPreferenceUtils.setInt(mSharedPreferences, TERMUX_APP.KEY_APP_SHELL_NUMBER_SINCE_BOOT,
-            TERMUX_APP.DEFAULT_VALUE_APP_SHELL_NUMBER_SINCE_BOOT, true);
+    public void resetAppShellNumberSinceBoot() {
+        synchronized (sLock) {
+            SharedPreferenceUtils.setInt(mSharedPreferences, TERMUX_APP.KEY_APP_SHELL_NUMBER_SINCE_BOOT,
+                TERMUX_APP.DEFAULT_VALUE_APP_SHELL_NUMBER_SINCE_BOOT, true);
+        }
     }
 
-    public synchronized int getAndIncrementTerminalSessionNumberSinceBoot() {
+    public int getAndIncrementTerminalSessionNumberSinceBoot() {
         // Keep value at MAX_VALUE on integer overflow and not 0, since not first shell.
         // apply() (async disk write) is enough here: the in-memory update is synchronous
         // and the counter is only read in-process, so command startup is not blocked on I/O.
-        return SharedPreferenceUtils.getAndIncrementInt(mSharedPreferences, TERMUX_APP.KEY_TERMINAL_SESSION_NUMBER_SINCE_BOOT,
-            TERMUX_APP.DEFAULT_VALUE_TERMINAL_SESSION_NUMBER_SINCE_BOOT, false, Integer.MAX_VALUE);
+        // Synchronized on the static lock, not the instance monitor: every spawned command
+        // used to get its own instance, so instance locks gave no mutual exclusion and two
+        // concurrent spawns could read the same value and double-increment.
+        synchronized (sLock) {
+            return SharedPreferenceUtils.getAndIncrementInt(mSharedPreferences, TERMUX_APP.KEY_TERMINAL_SESSION_NUMBER_SINCE_BOOT,
+                TERMUX_APP.DEFAULT_VALUE_TERMINAL_SESSION_NUMBER_SINCE_BOOT, false, Integer.MAX_VALUE);
+        }
     }
 
-    public synchronized void resetTerminalSessionNumberSinceBoot() {
-        SharedPreferenceUtils.setInt(mSharedPreferences, TERMUX_APP.KEY_TERMINAL_SESSION_NUMBER_SINCE_BOOT,
-            TERMUX_APP.DEFAULT_VALUE_TERMINAL_SESSION_NUMBER_SINCE_BOOT, true);
+    public void resetTerminalSessionNumberSinceBoot() {
+        synchronized (sLock) {
+            SharedPreferenceUtils.setInt(mSharedPreferences, TERMUX_APP.KEY_TERMINAL_SESSION_NUMBER_SINCE_BOOT,
+                TERMUX_APP.DEFAULT_VALUE_TERMINAL_SESSION_NUMBER_SINCE_BOOT, true);
+        }
     }
 
 

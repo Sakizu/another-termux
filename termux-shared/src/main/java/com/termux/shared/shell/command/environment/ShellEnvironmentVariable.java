@@ -23,6 +23,10 @@ public class ShellEnvironmentVariable implements Comparable<ShellEnvironmentVari
 
     @Override
     public int compareTo(ShellEnvironmentVariable other) {
+        // Use nulls-first ordering to avoid NPE when names are null
+        if (this.name == null && other.name == null) return 0;
+        if (this.name == null) return -1;
+        if (other.name == null) return 1;
         return this.name.compareTo(other.name);
     }
 }

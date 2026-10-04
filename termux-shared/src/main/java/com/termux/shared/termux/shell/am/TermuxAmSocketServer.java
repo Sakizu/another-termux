@@ -67,7 +67,7 @@ public class TermuxAmSocketServer {
 
     /** Whether {@link TermuxAmSocketServer} is enabled and running or not. */
     @Keep
-    protected static Boolean TERMUX_APP_AM_SOCKET_SERVER_ENABLED;
+    protected static volatile Boolean TERMUX_APP_AM_SOCKET_SERVER_ENABLED;
 
     /**
      * Setup the {@link AmSocketServer} {@link LocalServerSocket} and start listening for

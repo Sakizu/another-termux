@@ -20,11 +20,14 @@ public class SpecialButton {
     /**
      * Initialize a {@link SpecialButton}.
      *
+     * Kept private so external code cannot register new buttons and overwrite entries in
+     * {@link #map}; buttons are retrieved via {@link #valueOf(String)}.
+     *
      * @param key The unique key name for the special button. The key is registered in {@link #map}
      *            with which the {@link SpecialButton} can be retrieved via a call to
      *            {@link #valueOf(String)}.
      */
-    public SpecialButton(@NonNull final String key) {
+    private SpecialButton(@NonNull final String key) {
         this.key = key;
         map.put(key, this);
     }

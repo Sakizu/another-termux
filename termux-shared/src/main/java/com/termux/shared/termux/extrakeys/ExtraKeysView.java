@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ScheduledExecutorService;
 
 import java.util.Map;
@@ -207,7 +208,11 @@ public final class ExtraKeysView extends GridLayout {
     protected ScheduledExecutorService mScheduledExecutor;
     protected Handler mHandler;
     protected SpecialButtonsLongHoldRunnable mSpecialButtonsLongHoldRunnable;
-    protected int mLongPressCount;
+    /**
+     * The number of long press repeats. Written from the long-press scheduler thread and read on
+     * the UI thread, so an {@link AtomicInteger} is used for cross-thread visibility and atomicity.
+     */
+    protected final AtomicInteger mLongPressCount = new AtomicInteger();
 
     /** Cached value of {@link Settings.System#HAPTIC_FEEDBACK_ENABLED}, refreshed by
      * {@link #refreshHapticFeedbackEnabled()} and {@link #mHapticFeedbackSettingObserver}. */
@@ -391,7 +396,7 @@ public final class ExtraKeysView extends GridLayout {
 
     /** Set {@link #mLongPressRepeatDelay}. */
     public void setLongPressRepeatDelay(int longPressRepeatDelay) {
-        if (mLongPressRepeatDelay >= MIN_LONG_PRESS__REPEAT_DELAY && mLongPressRepeatDelay <= MAX_LONG_PRESS__REPEAT_DELAY) {
+        if (longPressRepeatDelay >= MIN_LONG_PRESS__REPEAT_DELAY && longPressRepeatDelay <= MAX_LONG_PRESS__REPEAT_DELAY) {
             mLongPressRepeatDelay = longPressRepeatDelay;
         } else {
             mLongPressRepeatDelay = DEFAULT_LONG_PRESS_REPEAT_DELAY;
@@ -488,7 +493,7 @@ public final class ExtraKeysView extends GridLayout {
                             view.setBackgroundColor(mButtonBackgroundColor);
                             stopScheduledExecutors();
                             // If ACTION_UP up was not from a repetitive key or was with a key with a popup button
-                            if (mLongPressCount == 0 || mPopupWindow != null) {
+                            if (mLongPressCount.get() == 0 || mPopupWindow != null) {
                                 // Trigger popup button click if swipe up complete
                                 if (mPopupWindow != null) {
                                     dismissPopup();
@@ -554,7 +559,7 @@ public final class ExtraKeysView extends GridLayout {
 
     public void onAnyExtraKeyButtonClick(View view, @NonNull ExtraKeyButton buttonInfo, MaterialButton button) {
         if (isSpecialButton(buttonInfo)) {
-            if (mLongPressCount > 0) return;
+            if (mLongPressCount.get() > 0) return;
             SpecialButtonState state = mSpecialButtons.get(SpecialButton.valueOf(buttonInfo.getKey()));
             if (state == null) return;
 
@@ -570,13 +575,13 @@ public final class ExtraKeysView extends GridLayout {
 
     public void startScheduledExecutors(View view, ExtraKeyButton buttonInfo, MaterialButton button) {
         stopScheduledExecutors();
-        mLongPressCount = 0;
+        mLongPressCount.set(0);
         if (mRepetitiveKeys.contains(buttonInfo.getKey())) {
             // Auto repeat key if long pressed until ACTION_UP stops it by calling stopScheduledExecutors.
             // Currently, only one (last) repeat key can run at a time. Old ones are stopped.
             mScheduledExecutor = Executors.newSingleThreadScheduledExecutor();
             mScheduledExecutor.scheduleWithFixedDelay(() -> {
-                mLongPressCount++;
+                mLongPressCount.incrementAndGet();
                 onExtraKeyButtonClick(view, buttonInfo, button);
             }, mLongPressTimeout, mLongPressRepeatDelay, TimeUnit.MILLISECONDS);
         } else if (isSpecialButton(buttonInfo)) {
@@ -616,7 +621,7 @@ public final class ExtraKeysView extends GridLayout {
             // Toggle active and lock state
             mState.setIsLocked(!mState.isActive);
             mState.setIsActive(!mState.isActive);
-            mLongPressCount++;
+            mLongPressCount.incrementAndGet();
         }
     }
 

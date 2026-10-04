@@ -149,8 +149,11 @@ public class TermuxSession {
         }
 
         Logger.logDebugExtended(LOG_TAG, executionCommand.toString());
-        Logger.logVerboseExtended(LOG_TAG, "\"" + executionCommand.getCommandIdAndLabelLogString() + "\" TermuxSession Environment:\n" +
-            Joiner.on("\n").join(environmentArray));
+        // Only build the environment dump string if verbose logging is enabled, since
+        // joining the whole environment array is wasteful when the log will be dropped
+        if (Logger.shouldEnableLoggingForCustomLogLevel(executionCommand.backgroundCustomLogLevel))
+            Logger.logVerboseExtended(LOG_TAG, "\"" + executionCommand.getCommandIdAndLabelLogString() + "\" TermuxSession Environment:\n" +
+                Joiner.on("\n").join(environmentArray));
 
         Logger.logDebug(LOG_TAG, "Running \"" + executionCommand.getCommandIdAndLabelLogString() + "\" TermuxSession");
         TerminalSession terminalSession = new TerminalSession(executionCommand.executable,

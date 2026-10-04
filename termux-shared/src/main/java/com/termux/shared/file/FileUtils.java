@@ -177,7 +177,7 @@ public class FileUtils {
             if (ensureUnder)
                 isPathInDirPaths = !path.equals(normalizedDirPath) && path.startsWith(normalizedDirPath + "/");
             else
-                isPathInDirPaths = path.startsWith(normalizedDirPath + "/");
+                isPathInDirPaths = path.equals(normalizedDirPath) || path.startsWith(normalizedDirPath + "/");
 
             if (isPathInDirPaths) return true;
         }

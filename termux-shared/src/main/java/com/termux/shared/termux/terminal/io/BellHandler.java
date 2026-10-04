@@ -11,7 +11,7 @@ import android.os.Vibrator;
 import com.termux.shared.logger.Logger;
 
 public class BellHandler {
-    private static BellHandler instance = null;
+    private static volatile BellHandler instance = null;
     private static final Object lock = new Object();
 
     private static final String LOG_TAG = "BellHandler";

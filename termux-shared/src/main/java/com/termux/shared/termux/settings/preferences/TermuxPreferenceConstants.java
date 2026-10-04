@@ -1,7 +1,7 @@
 package com.termux.shared.termux.settings.preferences;
 
 /*
- * Version: v0.16.0
+ * Version: v0.17.0
  *
  * Changelog
  *
@@ -69,6 +69,11 @@ package com.termux.shared.termux.settings.preferences;
  * - 0.16.0 (2022-06-11)
  *      - Added following to `TERMUX_APP`:
  *          `KEY_APP_SHELL_NUMBER_SINCE_BOOT` and `KEY_TERMINAL_SESSION_NUMBER_SINCE_BOOT`.
+ *
+ * - 0.17.0 (2026-10-04)
+ *      - Added following to `TERMUX_APP`:
+ *          `KEY_IMMERSIVE_MODE` and `DEFAULT_IMMERSIVE_MODE`,
+ *          `KEY_IMMERSIVE_HIDE_BARS` and `DEFAULT_IMMERSIVE_HIDE_BARS`.
  */
 
 import com.termux.shared.shell.command.ExecutionCommand;

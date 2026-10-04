@@ -16,7 +16,7 @@ import java.util.List;
 
 public class TermuxShellManager {
 
-    private static TermuxShellManager shellManager;
+    private static volatile TermuxShellManager shellManager;
 
     private static int SHELL_ID = 0;
 
@@ -62,7 +62,7 @@ public class TermuxShellManager {
      * @param context The {@link Context} for operations.
      * @return Returns the {@link TermuxShellManager}.
      */
-    public static TermuxShellManager init(@NonNull Context context) {
+    public static synchronized TermuxShellManager init(@NonNull Context context) {
         if (shellManager == null)
             shellManager = new TermuxShellManager(context);
 
