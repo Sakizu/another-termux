@@ -1,7 +1,7 @@
 package com.termux.shared.termux.settings.preferences;
 
 /*
- * Version: v0.17.0
+ * Version: v0.18.0
  *
  * Changelog
  *
@@ -74,6 +74,10 @@ package com.termux.shared.termux.settings.preferences;
  *      - Added following to `TERMUX_APP`:
  *          `KEY_IMMERSIVE_MODE` and `DEFAULT_IMMERSIVE_MODE`,
  *          `KEY_IMMERSIVE_HIDE_BARS` and `DEFAULT_IMMERSIVE_HIDE_BARS`.
+ *
+ * - 0.18.0 (2026-10-04)
+ *      - Added following to `TERMUX_APP`:
+ *          `KEY_KILL_SESSION_PROCESSES` and `DEFAULT_KILL_SESSION_PROCESSES`.
  */
 
 import com.termux.shared.shell.command.ExecutionCommand;
@@ -119,6 +123,15 @@ public final class TermuxPreferenceConstants {
          */
         public static final String KEY_IMMERSIVE_HIDE_BARS = "immersive_hide_bars";
         public static final boolean DEFAULT_IMMERSIVE_HIDE_BARS = false;
+
+
+        /**
+         * Defines the key for whether to kill a session's remaining background processes
+         * when the session finishes. When disabled (default, stock behavior), processes
+         * orphaned by an exited session keep running.
+         */
+        public static final String KEY_KILL_SESSION_PROCESSES = "kill_session_processes";
+        public static final boolean DEFAULT_KILL_SESSION_PROCESSES = false;
 
 
         /**

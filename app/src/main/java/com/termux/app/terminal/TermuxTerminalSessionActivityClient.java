@@ -19,6 +19,7 @@ import androidx.annotation.Nullable;
 
 import com.termux.R;
 import com.termux.shared.interact.ShareUtils;
+import com.termux.shared.shell.SessionProcessReaper;
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession;
 import com.termux.shared.termux.interact.TextInputDialogUtils;
 import com.termux.app.TermuxActivity;
@@ -171,6 +172,13 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
             return;
         }
 
+        // Best-effort cleanup of processes orphaned by the finished session, when the
+        // user opted in. The shell has already exited and been reaped by waitpid() at
+        // this point, so its pid is read from the stored execution command and the
+        // remaining children are matched by session id. Runs on a background thread:
+        // the scan plus the SIGTERM grace period must never block the main thread.
+        reapSessionProcessesIfEnabled(service, finishedSession);
+
         int index = service.getIndexOfSession(finishedSession);
 
         // For plugin commands that expect the result back, we should immediately close the session
@@ -206,6 +214,30 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
                 removeFinishedSession(finishedSession);
             }
         }
+    }
+
+    /**
+     * Kill processes orphaned by a finished session when the "kill_session_processes"
+     * preference is enabled. The shell pid was stored on the execution command when the
+     * session started ({@link #setTerminalShellPid}); the shell itself is already gone,
+     * so the reaper matches survivors by session id. Always runs off the main thread.
+     */
+    private void reapSessionProcessesIfEnabled(@NonNull TermuxService service,
+                                               @NonNull TerminalSession finishedSession) {
+        if (mActivity.getPreferences() == null
+                || !mActivity.getPreferences().isKillSessionProcessesEnabled()) {
+            return;
+        }
+        TermuxSession termuxSession = service.getTermuxSessionForTerminalSession(finishedSession);
+        if (termuxSession == null || termuxSession.getExecutionCommand() == null) return;
+        final int shellPid = termuxSession.getExecutionCommand().mPid;
+        if (shellPid <= 0) return;
+        new Thread("SessionProcessReaper[pid=" + shellPid + "]") {
+            @Override
+            public void run() {
+                SessionProcessReaper.reap(shellPid);
+            }
+        }.start();
     }
 
     @Override

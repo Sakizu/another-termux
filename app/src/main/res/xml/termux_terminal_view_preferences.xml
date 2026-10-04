@@ -22,6 +22,12 @@
             app:summaryOn="@string/termux_terminal_view_immersive_hide_bars_on"
             app:title="@string/termux_terminal_view_immersive_hide_bars_title" />
 
+        <SwitchPreferenceCompat
+            app:key="kill_session_processes"
+            app:summaryOff="@string/termux_terminal_view_kill_session_processes_off"
+            app:summaryOn="@string/termux_terminal_view_kill_session_processes_on"
+            app:title="@string/termux_terminal_view_kill_session_processes_title" />
+
     </PreferenceCategory>
 
 </PreferenceScreen>

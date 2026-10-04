@@ -80,6 +80,9 @@ class TerminalViewPreferencesDataStore extends PreferenceDataStore {
             case "immersive_hide_bars":
                     mPreferences.setImmersiveHideBars(value);
                 break;
+            case "kill_session_processes":
+                    mPreferences.setKillSessionProcesses(value);
+                break;
             default:
                 break;
         }
@@ -96,6 +99,8 @@ class TerminalViewPreferencesDataStore extends PreferenceDataStore {
                 return mPreferences.isImmersiveModeEnabled();
             case "immersive_hide_bars":
                 return mPreferences.isImmersiveHideBarsEnabled();
+            case "kill_session_processes":
+                return mPreferences.isKillSessionProcessesEnabled();
             default:
                 return false;
         }

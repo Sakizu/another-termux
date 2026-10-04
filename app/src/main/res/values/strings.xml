@@ -226,6 +226,11 @@
                 <string name="termux_terminal_view_immersive_hide_bars_off">The status and navigation bars will be shown.</string>
                 <string name="termux_terminal_view_immersive_hide_bars_on">The status and navigation bars will be hidden without resizing the terminal.</string>
 
+                <!-- Kill Session Processes -->
+                <string name="termux_terminal_view_kill_session_processes_title">Kill session processes on exit</string>
+                <string name="termux_terminal_view_kill_session_processes_off">Background processes will keep running after their session exits.</string>
+                <string name="termux_terminal_view_kill_session_processes_on">When a session closes, its remaining background processes will also be killed.</string>
+
 
 
     <!-- Termux:API App Preferences -->
