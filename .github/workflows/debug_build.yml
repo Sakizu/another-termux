@@ -29,7 +29,7 @@ jobs:
         # without a pinned JDK the com.android.application plugin silently
         # fails to apply ("No signature of method: ... .android()").
         # Java 11 is the newest JDK this Gradle/AGP combo officially supports.
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '11'
